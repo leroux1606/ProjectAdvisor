@@ -16,6 +16,7 @@ from app.rule_engine.risk_rules import check_risks
 from app.rule_engine.resource_rules import check_resources
 from app.rule_engine.governance_rules import check_governance
 from app.rule_engine.consistency_rules import check_consistency
+from app.rule_engine.domain_rules import check_domain_rules
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -489,6 +490,49 @@ class TestConsistencyRules:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# DOMAIN RULE PACKS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDomainRulePacks:
+
+    def test_software_rules_flag_missing_nfrs(self):
+        sections = ExtractedSections(
+            objectives="Deliver a new customer portal by Q4 2026 with improved service.",
+            scope="Build a new portal and integrate it with internal systems for customers.",
+            deliverables="Portal, support documentation, and training pack.",
+            timeline="Build phase: 8 weeks. Testing: 2 weeks. Milestone: go-live.",
+            resources="Project Manager: Jane (100% FTE). Technical Lead: Sam (80% FTE). Sponsor: CTO.",
+            risks="Risk Register: R1 delivery delay. Mitigation: weekly tracking. Owner: PM. Probability: medium. Impact: high.",
+        )
+        findings = check_domain_rules(sections, "software_it")
+        assert _has_rule(findings, "SOFTWARE_NFR_DEFINED")
+
+    def test_data_ai_rules_flag_missing_model_evaluation(self):
+        sections = ExtractedSections(
+            objectives="Deploy an AI assistant to improve internal response speed by 20% by Q3 2026.",
+            scope="Use company data to generate answers for service teams.",
+            deliverables="Data pipeline, AI assistant, and operations guide.",
+            timeline="Phase 1: 4 weeks. Phase 2: 6 weeks. Milestone: launch.",
+            resources="Project Manager: Jane (100% FTE). Data Engineer: Alex (80% FTE). Sponsor: COO.",
+            risks="Risk Register: data delay. Mitigation: escalation. Owner: PM. Probability: medium. Impact: high.",
+        )
+        findings = check_domain_rules(sections, "data_ai")
+        assert _has_rule(findings, "MODEL_EVALUATION_DEFINED")
+
+    def test_construction_rules_flag_missing_safety(self):
+        sections = ExtractedSections(
+            objectives="Complete the warehouse extension by Q2 2027 within approved budget.",
+            scope="Build the new warehouse footprint and connect utilities to the existing site.",
+            deliverables="Warehouse shell, utilities connection, and handover pack.",
+            timeline="Groundworks: 4 weeks. Steelwork: 6 weeks. Milestone: handover.",
+            resources="Project Manager: Jane (100% FTE). Sponsor: COO. Site Lead: Mark (100% FTE).",
+            risks="Risk Register: delay. Mitigation: buffer. Owner: PM. Probability: medium. Impact: high.",
+        )
+        findings = check_domain_rules(sections, "construction")
+        assert _has_rule(findings, "CONSTRUCTION_SAFETY_DEFINED")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SCORING ENGINE
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -821,12 +865,20 @@ The budget is not yet confirmed but we expect it to be reasonable for the scope 
         from app.pipeline.orchestrator import run_pipeline
         report = run_pipeline(text=self.GOOD_PLAN, enable_llm=False)
         assert report.generated_at
+        assert report.project_type == "general"
         assert report.overall_score >= 0
         assert report.overall_score <= 10
         assert report.grade in ("A", "B", "C", "D", "F")
         assert len(report.category_results) == 6
         assert len(report.recommendations) > 0
         assert report.llm_enabled is False
+
+    def test_project_type_adds_domain_findings(self):
+        from app.pipeline.orchestrator import run_pipeline
+        report = run_pipeline(text=self.GOOD_PLAN, enable_llm=False, project_type="software_it")
+        all_findings = [f for cat in report.category_results for f in cat.rule_findings]
+        assert report.project_type == "software_it"
+        assert any(f.rule_name.startswith("SOFTWARE_") for f in all_findings)
 
     def test_too_short_input_raises(self):
         from app.pipeline.orchestrator import run_pipeline, PipelineError

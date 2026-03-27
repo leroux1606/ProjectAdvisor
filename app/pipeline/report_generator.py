@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Optional
 
 from app.pipeline.scoring_engine import ScoreBreakdown
+from app.project_types import get_project_type_label
 from app.pipeline.section_extractor import ExtractedSections
 from app.rule_engine.models import AIInsight, CategoryResult, HybridBundle, RuleFinding, Severity
 
@@ -40,6 +41,7 @@ class RecommendationItem:
 class AuditReport:
     generated_at: str
     source_name: Optional[str]
+    project_type: str
     word_count: int
     sections_found: list[str]
     sections_missing: list[str]
@@ -115,6 +117,7 @@ def report_from_dict(data: dict) -> AuditReport:
     return AuditReport(
         generated_at=data["generated_at"],
         source_name=data.get("source_name"),
+        project_type=data.get("project_type", "general"),
         word_count=data["word_count"],
         sections_found=data.get("sections_found", []),
         sections_missing=data.get("sections_missing", []),
@@ -150,6 +153,7 @@ def report_to_markdown(report: AuditReport) -> str:
         "",
         f"- Generated: {report.generated_at}",
         f"- Source: {report.source_name or 'Pasted project plan'}",
+        f"- Project type: {get_project_type_label(report.project_type)}",
         f"- Words: {report.word_count}",
         f"- Overall score: {report.overall_score} / 10",
         f"- Grade: {report.grade}",
@@ -219,6 +223,7 @@ def _build_recommendations(bundle: HybridBundle) -> list[RecommendationItem]:
 
 def generate_report(
     source_name: Optional[str],
+    project_type: str,
     word_count: int,
     sections: ExtractedSections,
     bundle: HybridBundle,
@@ -240,6 +245,7 @@ def generate_report(
     return AuditReport(
         generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         source_name=source_name,
+        project_type=project_type,
         word_count=word_count,
         sections_found=sections.present_sections(),
         sections_missing=sections.missing_sections(),

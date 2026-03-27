@@ -75,6 +75,7 @@ def init_db() -> None:
                 user_id                 INTEGER NOT NULL REFERENCES users(id),
                 workspace_id            INTEGER REFERENCES workspaces(id),
                 source_name             TEXT,
+                project_type            TEXT    NOT NULL DEFAULT 'general',
                 source_type             TEXT    NOT NULL,
                 overall_score           REAL    NOT NULL,
                 grade                   TEXT    NOT NULL,
@@ -107,6 +108,7 @@ def init_db() -> None:
         _ensure_column(con, "users", "display_name", "TEXT")
         _ensure_column(con, "users", "organization", "TEXT")
         _ensure_column(con, "analysis_runs", "workspace_id", "INTEGER REFERENCES workspaces(id)")
+        _ensure_column(con, "analysis_runs", "project_type", "TEXT NOT NULL DEFAULT 'general'")
         _ensure_column(con, "analysis_runs", "report_json", "TEXT")
 
 
@@ -208,6 +210,7 @@ def record_analysis_run(
     user_id: int,
     workspace_id: Optional[int],
     source_name: Optional[str],
+    project_type: str,
     source_type: str,
     overall_score: float,
     grade: str,
@@ -222,14 +225,15 @@ def record_analysis_run(
     with _conn() as con:
         con.execute(
             """INSERT INTO analysis_runs (
-                user_id, workspace_id, source_name, source_type, overall_score, grade, word_count,
+                user_id, workspace_id, source_name, project_type, source_type, overall_score, grade, word_count,
                 sections_found_count, rule_findings_count, ai_insights_count,
                 llm_enabled, summary, report_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 user_id,
                 workspace_id,
                 source_name,
+                project_type,
                 source_type,
                 overall_score,
                 grade,

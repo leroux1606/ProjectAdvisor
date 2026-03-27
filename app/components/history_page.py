@@ -23,6 +23,7 @@ from app.auth.db import (
 from app.auth.models import User
 from app.auth.session import get_active_workspace_id
 from app.pipeline.report_generator import report_from_json, report_to_markdown
+from app.project_types import PROJECT_TYPE_PROFILES, get_project_type_label
 from app.utils.pdf_export import text_to_pdf_bytes
 
 
@@ -33,6 +34,7 @@ def _sort_rows(rows: list[dict], sort_by: str, ascending: bool) -> list[dict]:
         "Grade": lambda r: r.get("grade", ""),
         "Findings": lambda r: int(r.get("rule_findings_count", 0)),
         "Project": lambda r: (r.get("source_name") or "").lower(),
+        "Project type": lambda r: get_project_type_label(r.get("project_type", "general")).lower(),
     }
     return sorted(rows, key=key_map[sort_by], reverse=not ascending)
 
@@ -91,7 +93,7 @@ def render_history_page(user: User) -> None:
         st.info("No projects have been analysed yet.")
         return
 
-    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4, gap="small")
+    filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns(5, gap="small")
     with filter_col1:
         search_text = st.text_input("Search", placeholder="Project name or summary")
     with filter_col2:
@@ -99,7 +101,12 @@ def render_history_page(user: User) -> None:
     with filter_col3:
         ai_filter = st.selectbox("AI mode", ["All", "AI enabled", "Rule-based only"])
     with filter_col4:
-        sort_by = st.selectbox("Sort by", ["Date", "Score", "Grade", "Findings", "Project"])
+        project_type_filter = st.selectbox(
+            "Project type",
+            ["All"] + [profile.label for profile in PROJECT_TYPE_PROFILES],
+        )
+    with filter_col5:
+        sort_by = st.selectbox("Sort by", ["Date", "Score", "Grade", "Findings", "Project", "Project type"])
         ascending = st.toggle("Ascending", value=False)
 
     filtered_rows = rows
@@ -117,6 +124,11 @@ def render_history_page(user: User) -> None:
         filtered_rows = [row for row in filtered_rows if row.get("llm_enabled")]
     elif ai_filter == "Rule-based only":
         filtered_rows = [row for row in filtered_rows if not row.get("llm_enabled")]
+    if project_type_filter != "All":
+        filtered_rows = [
+            row for row in filtered_rows
+            if get_project_type_label(row.get("project_type", "general")) == project_type_filter
+        ]
 
     filtered_rows = _sort_rows(filtered_rows, sort_by, ascending)
     if not filtered_rows:
@@ -126,8 +138,9 @@ def render_history_page(user: User) -> None:
     export_buffer = io.StringIO()
     writer = csv.DictWriter(
         export_buffer,
-        fieldnames=["Date", "Project", "Workspace", "Source", "Score", "Grade", "Findings", "AI", "Summary"],
+        fieldnames=["Date", "Project", "Project type", "Workspace", "Source", "Score", "Grade", "Findings", "AI", "Summary"],
     )
+    export_fields = set(writer.fieldnames or [])
     writer.writeheader()
 
     table_rows = []
@@ -137,6 +150,7 @@ def render_history_page(user: User) -> None:
             "ID": row["id"],
             "Date": (row.get("created_at") or "")[:16].replace("T", " "),
             "Project": row.get("source_name") or "Pasted project plan",
+            "Project type": get_project_type_label(row.get("project_type", "general")),
             "Workspace": row.get("workspace_name") or "Personal",
             "Ownership": "Mine" if row.get("user_id") == user.id else "Shared",
             "Source": row.get("source_type", "unknown").title(),
@@ -147,7 +161,7 @@ def render_history_page(user: User) -> None:
             "Summary": row.get("summary", ""),
         }
         table_rows.append(entry)
-        writer.writerow({k: v for k, v in entry.items() if k != "Select" and k != "ID"})
+        writer.writerow({k: v for k, v in entry.items() if k in export_fields})
 
     st.markdown("### Checked Projects")
     df = pd.DataFrame(table_rows)
@@ -232,6 +246,11 @@ def render_history_page(user: User) -> None:
                     "Metric": "Source",
                     "First report": left_report.source_name or "Pasted project plan",
                     "Second report": right_report.source_name or "Pasted project plan",
+                },
+                {
+                    "Metric": "Project type",
+                    "First report": get_project_type_label(left_report.project_type),
+                    "Second report": get_project_type_label(right_report.project_type),
                 },
                 {
                     "Metric": "Overall score",

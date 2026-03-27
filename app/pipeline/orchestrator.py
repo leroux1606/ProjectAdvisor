@@ -36,6 +36,7 @@ def run_pipeline(
     text: Optional[str] = None,
     filename: Optional[str] = None,
     file_bytes: Optional[bytes] = None,
+    project_type: str = "general",
     enable_llm: bool = True,
     progress_callback=None,
 ) -> AuditReport:
@@ -90,7 +91,7 @@ def run_pipeline(
     # ── Stage 4: Rule Engine (deterministic) ──────────────────────────────────
     _progress("Running rule checks", 30)
     try:
-        bundle = run_rules(sections)
+        bundle = run_rules(sections, project_type=project_type)
     except Exception as exc:
         raise PipelineError(f"Rule engine failed: {exc}") from exc
 
@@ -113,6 +114,7 @@ def run_pipeline(
     _progress("Assembling report", 95)
     report = generate_report(
         source_name=raw.filename,
+        project_type=project_type,
         word_count=preprocessed.word_count,
         sections=sections,
         bundle=bundle,

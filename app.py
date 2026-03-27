@@ -28,6 +28,7 @@ from app.components.top_issues import render_top_issues
 from app.components.workspace_page import render_workspace_page
 from app.pipeline.orchestrator import PipelineError, run_pipeline
 from app.pipeline.report_generator import AuditReport, report_to_json, report_to_markdown
+from app.project_types import PROJECT_TYPE_MAP, PROJECT_TYPE_PROFILES, get_project_type_label
 from app.utils.pdf_export import text_to_pdf_bytes
 
 st.set_page_config(
@@ -341,6 +342,7 @@ if not user.can_analyse():
 
 def render_report_view(report: AuditReport) -> None:
     escaped_source_name = escape(report.source_name) if report.source_name else ""
+    project_type_label = escape(get_project_type_label(report.project_type))
 
     st.markdown("---")
 
@@ -355,6 +357,7 @@ def render_report_view(report: AuditReport) -> None:
             f'<div style="color:#475569;font-size:0.8rem;text-align:right;">'
             f'{report.generated_at}'
             f'{"&nbsp;· " + escaped_source_name if report.source_name else ""}'
+            f'&nbsp;· {project_type_label}'
             f'&nbsp;· {report.word_count:,} words'
             f'</div>',
             unsafe_allow_html=True,
@@ -427,6 +430,11 @@ def render_report_view(report: AuditReport) -> None:
         total_findings = sum(len(r.rule_findings) for r in report.category_results)
         total_ai = len(report.ai_insights)
         st.markdown(
+            f'<div style="margin-bottom:0.75rem;"><span style="background:#1d4ed8;color:#dbeafe;padding:2px 8px;'
+            f'border-radius:4px;font-size:0.78rem;margin:2px;">{project_type_label}</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
             f'<div style="color:#64748b;font-size:0.82rem;margin-bottom:0.75rem;">'
             f'<strong style="color:#94a3b8">{total_findings}</strong> rule findings &nbsp;·&nbsp; '
             f'<strong style="color:#60a5fa">{total_ai}</strong> AI insights</div>',
@@ -476,6 +484,7 @@ analyze_clicked = False
 text_input: str = ""
 uploaded_filename: str | None = None
 uploaded_bytes: bytes | None = None
+selected_project_type = st.session_state.get("project_type_selector", "general")
 
 with st.expander("Submit Project Plan", expanded=("report" not in st.session_state)):
     input_col, action_col = st.columns([3, 1.15], gap="large")
@@ -519,6 +528,17 @@ with st.expander("Submit Project Plan", expanded=("report" not in st.session_sta
                 st.success(f"Loaded: **{uploaded_filename}** ({len(uploaded_bytes):,} bytes)")
 
     with action_col:
+        selected_project_type = st.selectbox(
+            "Project type",
+            options=[profile.id for profile in PROJECT_TYPE_PROFILES],
+            index=next(
+                (i for i, profile in enumerate(PROJECT_TYPE_PROFILES) if profile.id == selected_project_type),
+                0,
+            ),
+            format_func=get_project_type_label,
+            key="project_type_selector",
+            help="Tailor rule packs and recommendations for the kind of project you are auditing.",
+        )
         st.markdown(
             """
             <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:1rem;">
@@ -528,6 +548,11 @@ with st.expander("Submit Project Plan", expanded=("report" not in st.session_sta
                 </div>
             </div>
             """,
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div style="color:#cbd5e1;font-size:0.8rem;margin:0.45rem 0 0.85rem;">'
+            f'{escape(PROJECT_TYPE_MAP[selected_project_type].description)}</div>',
             unsafe_allow_html=True,
         )
         analyze_clicked = st.button("Analyze Project Plan", use_container_width=True)
@@ -570,6 +595,7 @@ if analyze_clicked:
             text=text_input if has_text and not has_file else None,
             filename=uploaded_filename,
             file_bytes=uploaded_bytes,
+            project_type=selected_project_type,
             enable_llm=enable_llm,
             progress_callback=update_progress,
         )
@@ -593,6 +619,7 @@ if analyze_clicked:
         user_id=user.id,
         workspace_id=active_workspace_id,
         source_name=report.source_name,
+        project_type=report.project_type,
         source_type="upload" if has_file else "text",
         overall_score=report.overall_score,
         grade=report.grade,

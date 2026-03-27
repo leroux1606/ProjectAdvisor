@@ -19,6 +19,7 @@ from app.auth.db import (
 from app.auth.models import Tier, User
 from app.auth.session import get_active_workspace_id, logout, refresh_user
 from app.payments.plans import FREE_MONTHLY_LIMIT
+from app.project_types import get_project_type_label
 
 
 def render_dashboard(user: User) -> None:
@@ -211,6 +212,7 @@ def _render_recent_analyses(user: User, workspace_id: int | None) -> None:
         summary = escape(row.get("summary", ""))
         workspace_name = escape(row.get("workspace_name") or "Personal")
         source_type = escape(row.get("source_type", "unknown").title())
+        project_type = escape(get_project_type_label(row.get("project_type", "general")))
         grade = escape(row.get("grade", "—"))
         st.markdown(
             f"""
@@ -220,7 +222,7 @@ def _render_recent_analyses(user: User, workspace_id: int | None) -> None:
                     <div>
                         <div style="color:#f1f5f9;font-size:0.92rem;font-weight:600;">{source_name}</div>
                         <div style="color:#cbd5e1;font-size:0.78rem;margin-top:0.15rem;">
-                            {created} · {source_type} · {ai_label} · {workspace_name}
+                            {created} · {source_type} · {project_type} · {ai_label} · {workspace_name}
                         </div>
                     </div>
                     <div style="text-align:right;">

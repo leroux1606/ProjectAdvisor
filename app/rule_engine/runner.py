@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from app.pipeline.section_extractor import ExtractedSections
 from app.rule_engine.consistency_rules import check_consistency
+from app.rule_engine.domain_rules import check_domain_rules
 from app.rule_engine.governance_rules import check_governance
 from app.rule_engine.models import CategoryResult, HybridBundle
 from app.rule_engine.resource_rules import check_resources
@@ -15,7 +16,7 @@ from app.rule_engine.structure_rules import check_structure
 from app.rule_engine.timeline_rules import check_timeline
 
 
-def run_rules(sections: ExtractedSections) -> HybridBundle:
+def run_rules(sections: ExtractedSections, project_type: str = "general") -> HybridBundle:
     """
     Run all deterministic rule checks and return a HybridBundle
     with empty ai_insights lists (to be filled by the LLM engine if enabled).
@@ -52,4 +53,8 @@ def run_rules(sections: ExtractedSections) -> HybridBundle:
             rule_findings=check_consistency(sections),
         ),
     )
+    for finding in check_domain_rules(sections, project_type):
+        category = getattr(bundle, finding.category, None)
+        if category is not None:
+            category.rule_findings.append(finding)
     return bundle
