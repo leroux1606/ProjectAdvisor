@@ -1,24 +1,31 @@
 """
-Pipeline Orchestrator — runs all stages in sequence and returns a final AuditReport.
-This is the single entry point for the UI layer.
+Pipeline Orchestrator — hybrid analysis pipeline.
+
+Execution order:
+  1. Input ingestion
+  2. Preprocessing
+  3. Section extraction (regex primary, LLM fallback)
+  4. Rule engine (deterministic, always runs)
+  5. LLM insight engine (optional, enriches rule findings)
+  6. Scoring (deterministic, from rule findings only)
+  7. Report assembly
 """
 
 from __future__ import annotations
 
+import logging
+import os
 from typing import Optional
 
-from app.analysis.consistency_analysis import run_consistency_analysis
-from app.analysis.governance_analysis import run_governance_analysis
-from app.analysis.models import AnalysisBundle
-from app.analysis.resource_analysis import run_resource_analysis
-from app.analysis.risk_analysis import run_risk_analysis
-from app.analysis.structure_analysis import run_structure_analysis
-from app.analysis.timeline_analysis import run_timeline_analysis
+from app.llm_engine.insights import generate_insights
 from app.pipeline.input_layer import RawInput, ingest_file, ingest_text
 from app.pipeline.preprocessor import preprocess
 from app.pipeline.report_generator import AuditReport, generate_report
 from app.pipeline.scoring_engine import compute_scores
 from app.pipeline.section_extractor import extract_sections
+from app.rule_engine.runner import run_rules
+
+logger = logging.getLogger(__name__)
 
 
 class PipelineError(Exception):
@@ -29,23 +36,29 @@ def run_pipeline(
     text: Optional[str] = None,
     filename: Optional[str] = None,
     file_bytes: Optional[bytes] = None,
+    enable_llm: bool = True,
     progress_callback=None,
 ) -> AuditReport:
     """
-    Execute the full analysis pipeline.
+    Execute the full hybrid analysis pipeline.
 
-    Provide either:
-    - text: plain text string (pasted input)
-    - filename + file_bytes: uploaded file
-
-    progress_callback(stage: str, pct: int) is called at each stage if provided.
+    Parameters
+    ----------
+    text         : pasted plain text input
+    filename     : name of uploaded file (with extension)
+    file_bytes   : raw bytes of uploaded file
+    enable_llm   : whether to run the LLM insight layer (default: True)
+                   Set False to run fully offline / deterministic mode.
+    progress_callback(stage: str, pct: int) : optional UI progress hook
     """
 
     def _progress(stage: str, pct: int) -> None:
         if progress_callback:
             progress_callback(stage, pct)
 
-    # --- Stage 1: Input ---
+    llm_available = enable_llm and bool(os.getenv("OPENAI_API_KEY"))
+
+    # ── Stage 1: Input ────────────────────────────────────────────────────────
     _progress("Ingesting input", 5)
     try:
         if file_bytes and filename:
@@ -57,7 +70,7 @@ def run_pipeline(
     except ValueError as exc:
         raise PipelineError(str(exc)) from exc
 
-    # --- Stage 2: Preprocessing ---
+    # ── Stage 2: Preprocessing ────────────────────────────────────────────────
     _progress("Preprocessing text", 10)
     preprocessed = preprocess(raw)
 
@@ -67,71 +80,44 @@ def run_pipeline(
             "Please provide a more complete project plan."
         )
 
-    # --- Stage 3: Section Extraction ---
-    _progress("Extracting sections", 20)
+    # ── Stage 3: Section Extraction ───────────────────────────────────────────
+    _progress("Extracting sections", 18)
     try:
         sections = extract_sections(preprocessed)
     except Exception as exc:
         raise PipelineError(f"Section extraction failed: {exc}") from exc
 
-    # --- Stage 4: Analysis Engine ---
-    _progress("Analysing structure", 30)
+    # ── Stage 4: Rule Engine (deterministic) ──────────────────────────────────
+    _progress("Running rule checks", 30)
     try:
-        structure = run_structure_analysis(sections)
+        bundle = run_rules(sections)
     except Exception as exc:
-        raise PipelineError(f"Structure analysis failed: {exc}") from exc
+        raise PipelineError(f"Rule engine failed: {exc}") from exc
 
-    _progress("Analysing consistency", 45)
-    try:
-        consistency = run_consistency_analysis(sections)
-    except Exception as exc:
-        raise PipelineError(f"Consistency analysis failed: {exc}") from exc
+    # ── Stage 5: LLM Insight Engine (optional) ────────────────────────────────
+    if llm_available:
+        _progress("Generating AI insights", 65)
+        try:
+            bundle = generate_insights(sections, bundle)
+        except Exception as exc:
+            # Non-fatal — log and continue with rule findings only
+            logger.warning("LLM insight layer failed (non-fatal): %s", exc)
+    else:
+        _progress("Skipping AI insights (offline mode)", 65)
 
-    _progress("Analysing timeline", 57)
-    try:
-        timeline = run_timeline_analysis(sections)
-    except Exception as exc:
-        raise PipelineError(f"Timeline analysis failed: {exc}") from exc
-
-    _progress("Analysing risks", 68)
-    try:
-        risk = run_risk_analysis(sections)
-    except Exception as exc:
-        raise PipelineError(f"Risk analysis failed: {exc}") from exc
-
-    _progress("Analysing resources", 78)
-    try:
-        resource = run_resource_analysis(sections)
-    except Exception as exc:
-        raise PipelineError(f"Resource analysis failed: {exc}") from exc
-
-    _progress("Analysing governance", 87)
-    try:
-        governance = run_governance_analysis(sections)
-    except Exception as exc:
-        raise PipelineError(f"Governance analysis failed: {exc}") from exc
-
-    bundle = AnalysisBundle(
-        structure=structure,
-        consistency=consistency,
-        timeline=timeline,
-        risk=risk,
-        resource=resource,
-        governance=governance,
-    )
-
-    # --- Stage 5: Scoring ---
-    _progress("Computing scores", 93)
+    # ── Stage 6: Scoring (deterministic) ─────────────────────────────────────
+    _progress("Computing scores", 85)
     scores = compute_scores(bundle)
 
-    # --- Stage 6: Report Generation ---
-    _progress("Generating report", 97)
+    # ── Stage 7: Report Assembly ──────────────────────────────────────────────
+    _progress("Assembling report", 95)
     report = generate_report(
         source_name=raw.filename,
         word_count=preprocessed.word_count,
         sections=sections,
         bundle=bundle,
         scores=scores,
+        llm_enabled=llm_available,
     )
 
     _progress("Complete", 100)

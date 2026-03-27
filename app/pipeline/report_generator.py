@@ -9,33 +9,29 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.analysis.models import AnalysisBundle, Finding, Severity
 from app.pipeline.scoring_engine import ScoreBreakdown
 from app.pipeline.section_extractor import ExtractedSections
+from app.rule_engine.models import AIInsight, CategoryResult, HybridBundle, RuleFinding, Severity
+
+
+_SEVERITY_PRIORITY: dict[Severity, int] = {
+    Severity.CRITICAL: 1,
+    Severity.HIGH: 2,
+    Severity.MEDIUM: 3,
+    Severity.LOW: 4,
+    Severity.INFO: 5,
+}
 
 
 @dataclass
 class RecommendationItem:
-    priority: int          # 1 = highest
+    priority: int
     category: str
+    rule_id: str
     title: str
     action: str
     severity: Severity
-
-
-@dataclass
-class FindingsGroup:
-    category: str
-    label: str
-    findings: list[Finding] = field(default_factory=list)
-
-    @property
-    def critical_count(self) -> int:
-        return sum(1 for f in self.findings if f.severity == Severity.CRITICAL)
-
-    @property
-    def high_count(self) -> int:
-        return sum(1 for f in self.findings if f.severity == Severity.HIGH)
+    rule_name: str
 
 
 @dataclass
@@ -48,95 +44,60 @@ class AuditReport:
     overall_score: float
     grade: str
     score_breakdown: ScoreBreakdown
-    top_issues: list[Finding]
-    findings_groups: list[FindingsGroup]
+    top_issues: list[RuleFinding]
+    category_results: list[CategoryResult]
     recommendations: list[RecommendationItem]
+    ai_insights: list[AIInsight]
+    llm_enabled: bool
 
 
-_SEVERITY_PRIORITY: dict[Severity, int] = {
-    Severity.CRITICAL: 1,
-    Severity.HIGH: 2,
-    Severity.MEDIUM: 3,
-    Severity.LOW: 4,
-    Severity.INFO: 5,
-}
-
-
-def _build_recommendations(bundle: AnalysisBundle) -> list[RecommendationItem]:
-    """Derive prioritised, actionable recommendations from all findings."""
-    items: list[RecommendationItem] = []
-
-    all_findings: list[Finding] = []
-    for module in [bundle.structure, bundle.consistency, bundle.timeline,
-                   bundle.risk, bundle.resource, bundle.governance]:
-        if module:
-            all_findings.extend(module.findings)
+def _build_recommendations(bundle: HybridBundle) -> list[RecommendationItem]:
+    all_findings = bundle.all_rule_findings()
 
     # Deduplicate by title (case-insensitive)
-    seen_titles: set[str] = set()
-    unique_findings: list[Finding] = []
+    seen: set[str] = set()
+    unique: list[RuleFinding] = []
     for f in all_findings:
         key = f.title.lower().strip()
-        if key not in seen_titles:
-            seen_titles.add(key)
-            unique_findings.append(f)
+        if key not in seen:
+            seen.add(key)
+            unique.append(f)
 
-    # Sort: critical first, then by category
-    unique_findings.sort(key=lambda f: (_SEVERITY_PRIORITY.get(f.severity, 99), f.category))
+    unique.sort(key=lambda f: (_SEVERITY_PRIORITY.get(f.severity, 99), f.category))
 
-    for i, finding in enumerate(unique_findings, start=1):
-        items.append(RecommendationItem(
+    return [
+        RecommendationItem(
             priority=i,
-            category=finding.category,
-            title=finding.title,
-            action=finding.recommendation,
-            severity=finding.severity,
-        ))
-
-    return items
+            category=f.category,
+            rule_id=f.rule_id,
+            title=f.title,
+            action=f.suggested_fix,
+            severity=f.severity,
+            rule_name=f.rule_name,
+        )
+        for i, f in enumerate(unique, start=1)
+    ]
 
 
 def generate_report(
     source_name: Optional[str],
     word_count: int,
     sections: ExtractedSections,
-    bundle: AnalysisBundle,
+    bundle: HybridBundle,
     scores: ScoreBreakdown,
+    llm_enabled: bool = False,
 ) -> AuditReport:
-    findings_groups: list[FindingsGroup] = [
-        FindingsGroup(
-            category="structure",
-            label="Structure & Completeness",
-            findings=bundle.structure.findings if bundle.structure else [],
-        ),
-        FindingsGroup(
-            category="consistency",
-            label="Internal Consistency",
-            findings=bundle.consistency.findings if bundle.consistency else [],
-        ),
-        FindingsGroup(
-            category="timeline",
-            label="Timeline & Scheduling",
-            findings=bundle.timeline.findings if bundle.timeline else [],
-        ),
-        FindingsGroup(
-            category="risk",
-            label="Risk Management",
-            findings=bundle.risk.findings if bundle.risk else [],
-        ),
-        FindingsGroup(
-            category="resource",
-            label="Resource Planning",
-            findings=bundle.resource.findings if bundle.resource else [],
-        ),
-        FindingsGroup(
-            category="governance",
-            label="Governance & Oversight",
-            findings=bundle.governance.findings if bundle.governance else [],
-        ),
+    category_order = [
+        bundle.structure,
+        bundle.consistency,
+        bundle.timeline,
+        bundle.risk,
+        bundle.resource,
+        bundle.governance,
     ]
-
+    category_results = [c for c in category_order if c is not None]
     recommendations = _build_recommendations(bundle)
+    all_insights = bundle.all_ai_insights()
 
     return AuditReport(
         generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -148,6 +109,8 @@ def generate_report(
         grade=scores.grade,
         score_breakdown=scores,
         top_issues=scores.top_issues,
-        findings_groups=findings_groups,
+        category_results=category_results,
         recommendations=recommendations,
+        ai_insights=all_insights,
+        llm_enabled=llm_enabled,
     )
