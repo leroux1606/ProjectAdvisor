@@ -8,7 +8,7 @@ from typing import Optional
 
 import streamlit as st
 
-from app.auth.db import get_user_by_id, get_user_workspaces, init_db
+from app.auth.db import get_user_by_id, get_user_workspaces, init_db, user_has_workspace_access
 from app.auth.models import User
 
 _KEY = "auth_user_id"
@@ -59,7 +59,14 @@ def refresh_user() -> Optional[User]:
 
 
 def get_active_workspace_id() -> Optional[int]:
-    return st.session_state.get(_WORKSPACE_KEY)
+    workspace_id = st.session_state.get(_WORKSPACE_KEY)
+    user_id = st.session_state.get(_KEY)
+    if workspace_id is None or user_id is None:
+        return None
+    if not user_has_workspace_access(user_id, workspace_id):
+        st.session_state[_WORKSPACE_KEY] = None
+        return None
+    return workspace_id
 
 
 def set_active_workspace_id(workspace_id: Optional[int]) -> None:

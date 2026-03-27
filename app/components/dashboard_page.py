@@ -8,7 +8,14 @@ from html import escape
 
 import streamlit as st
 
-from app.auth.db import get_analysis_history, get_analysis_stats, get_analysis_stats_for_workspace, get_user_transactions, get_workspace, update_user
+from app.auth.db import (
+    get_analysis_history,
+    get_analysis_stats,
+    get_analysis_stats_for_workspace,
+    get_user_transactions,
+    get_workspace,
+    update_user,
+)
 from app.auth.models import Tier, User
 from app.auth.session import get_active_workspace_id, logout, refresh_user
 from app.payments.plans import FREE_MONTHLY_LIMIT
@@ -28,7 +35,10 @@ def render_dashboard(user: User) -> None:
         unsafe_allow_html=True,
     )
     if workspace:
-        st.info(f'Active workspace: {workspace["name"]}. New analyses are currently saved to this shared workspace.')
+        st.info(
+            f'Active workspace: {escape(workspace["name"])}. '
+            "New analyses are currently saved to this shared workspace."
+        )
 
     col_info, col_actions = st.columns([2, 1], gap="large")
 
@@ -200,6 +210,8 @@ def _render_recent_analyses(user: User, workspace_id: int | None) -> None:
         findings = row.get("rule_findings_count", 0)
         summary = escape(row.get("summary", ""))
         workspace_name = escape(row.get("workspace_name") or "Personal")
+        source_type = escape(row.get("source_type", "unknown").title())
+        grade = escape(row.get("grade", "—"))
         st.markdown(
             f"""
             <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;
@@ -208,12 +220,12 @@ def _render_recent_analyses(user: User, workspace_id: int | None) -> None:
                     <div>
                         <div style="color:#f1f5f9;font-size:0.92rem;font-weight:600;">{source_name}</div>
                         <div style="color:#cbd5e1;font-size:0.78rem;margin-top:0.15rem;">
-                            {created} · {row.get("source_type", "unknown").title()} · {ai_label} · {workspace_name}
+                            {created} · {source_type} · {ai_label} · {workspace_name}
                         </div>
                     </div>
                     <div style="text-align:right;">
                         <div style="color:#60a5fa;font-size:1.05rem;font-weight:700;">{row.get("overall_score", 0):.1f}</div>
-                        <div style="color:#cbd5e1;font-size:0.75rem;">Grade {row.get("grade", "—")}</div>
+                        <div style="color:#cbd5e1;font-size:0.75rem;">Grade {grade}</div>
                     </div>
                 </div>
                 <div style="color:#cbd5e1;font-size:0.78rem;margin-top:0.45rem;">
@@ -242,6 +254,7 @@ def _render_transactions(user: User) -> None:
             "credit_purchase": f"+{credits} credits",
             "subscription_start": "Pro subscription started",
         }.get(tx_type, tx_type)
+        safe_label = escape(label)
 
         amount_str = f"£{amount / 100:.2f}" if amount else ""
 
@@ -249,7 +262,7 @@ def _render_transactions(user: User) -> None:
             f'<div style="display:flex;justify-content:space-between;'
             f'padding:0.4rem 0;border-bottom:1px solid #1e293b;font-size:0.83rem;">'
             f'<span style="color:#94a3b8;">{created}</span>'
-            f'<span style="color:#f1f5f9;">{label}</span>'
+            f'<span style="color:#f1f5f9;">{safe_label}</span>'
             f'<span style="color:#4ade80;">{amount_str}</span>'
             f'</div>',
             unsafe_allow_html=True,
@@ -286,14 +299,7 @@ def _render_actions(user: User) -> None:
         app_url = os.getenv("APP_URL", "http://localhost:3000")
         try:
             portal_url = create_billing_portal_session(user.stripe_customer_id, app_url)
-            st.markdown(
-                f'<a href="{portal_url}" target="_blank" style="'
-                f'display:block;background:#1e293b;border:1px solid #334155;border-radius:8px;'
-                f'padding:0.5rem 1rem;color:#94a3b8;text-align:center;font-size:0.88rem;'
-                f'text-decoration:none;margin-top:0.5rem;">'
-                f'Manage Subscription ↗</a>',
-                unsafe_allow_html=True,
-            )
+            st.link_button("Manage Subscription", portal_url, use_container_width=True)
         except Exception:
             pass
 

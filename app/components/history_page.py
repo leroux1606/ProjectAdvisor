@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import io
+from html import escape
 
 import pandas as pd
 import streamlit as st
@@ -57,7 +58,10 @@ def render_history_page(user: User) -> None:
     )
 
     if workspace:
-        st.info(f'Viewing shared history for workspace "{workspace["name"]}". Switch to Personal workspace in Workspaces to see only your private reports.')
+        st.info(
+            f'Viewing shared history for workspace "{escape(workspace["name"])}". '
+            "Switch to Personal workspace in Workspaces to see only your private reports."
+        )
     else:
         st.info(
             "Viewing your private history. Switch to a shared workspace to see team analyses."
@@ -179,8 +183,8 @@ def render_history_page(user: User) -> None:
             st.rerun()
     with action_col3:
         if st.button("Clear My Saved History", use_container_width=True, type="secondary"):
-            clear_analysis_history(user.id)
-            st.success("Your saved history was cleared.")
+            clear_analysis_history(user.id, workspace_id=workspace_id)
+            st.success("Your saved history in the current scope was cleared.")
             st.rerun()
 
     if len(selected_ids) == 1:

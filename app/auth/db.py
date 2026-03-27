@@ -298,9 +298,18 @@ def delete_analysis_run(run_id: int, user_id: int) -> None:
         )
 
 
-def clear_analysis_history(user_id: int) -> None:
+def clear_analysis_history(user_id: int, workspace_id: Optional[int] = None) -> None:
     with _conn() as con:
-        con.execute("DELETE FROM analysis_runs WHERE user_id = ?", (user_id,))
+        if workspace_id is None:
+            con.execute(
+                "DELETE FROM analysis_runs WHERE user_id = ? AND workspace_id IS NULL",
+                (user_id,),
+            )
+        else:
+            con.execute(
+                "DELETE FROM analysis_runs WHERE user_id = ? AND workspace_id = ?",
+                (user_id, workspace_id),
+            )
 
 
 def export_user_data(user_id: int) -> dict:
@@ -459,3 +468,14 @@ def get_user_workspaces(user_id: int) -> list[dict]:
             (user_id,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def user_has_workspace_access(user_id: int, workspace_id: int) -> bool:
+    with _conn() as con:
+        row = con.execute(
+            """SELECT 1
+               FROM workspace_members
+               WHERE user_id = ? AND workspace_id = ?""",
+            (user_id, workspace_id),
+        ).fetchone()
+        return row is not None

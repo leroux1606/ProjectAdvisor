@@ -1,42 +1,106 @@
 # Project Plan Scrutinizer
 
-A deterministic project audit tool — not a chatbot.
+A deterministic project audit application for reviewing project plans. This is **not** a chatbot.
 
-Ingests a project plan (PDF, DOCX, TXT, or pasted text) and produces a structured audit report with scores, findings, and prioritised recommendations aligned with **PRINCE2** and **PMBOK** standards.
+The app accepts a project plan as pasted text or an uploaded document, runs it through a hybrid audit pipeline, and returns a structured report with scores, findings, recommendations, saved history, exports, privacy controls, and optional team workspaces.
 
----
+## What it does
+
+- Ingests `PDF`, `DOCX`, `TXT`, and `MD` project plans
+- Extracts core sections such as objectives, scope, deliverables, timeline, resources, risks, governance, assumptions, constraints, and budget
+- Runs a deterministic rule engine for structure, consistency, timeline, risk, resource, and governance checks
+- Optionally adds AI insights for softer quality issues when an OpenAI key is configured
+- Scores the plan deterministically from rule findings only
+- Saves report history with filtering, comparison, export, and reopen support
+- Supports user accounts, free usage, credit packs, subscriptions, privacy/data export, and shared workspaces
+
+## Key product behavior
+
+- **Deterministic-first**: the rule engine is the primary source of truth
+- **Optional AI layer**: AI insights are supplementary and do not affect scoring
+- **True deterministic mode**: when AI is disabled, the app does not use LLM fallback for section extraction
+- **Structured output**: results are rendered as an audit report, not a conversation
+- **Privacy-conscious defaults**: the app stores report metadata and saved report output, but does not intentionally retain raw uploaded document content by default
+
+## Main features
+
+### Analysis
+
+- Overall score and grade
+- Weighted category breakdown
+- Top issues
+- Detailed rule findings by category
+- Prioritised recommendations
+- Optional AI insights
+
+### Account and usage
+
+- Email-based registration and login
+- Free tier with monthly usage limits
+- Credit-pack and subscription support
+- Profile details such as display name and organisation
+- Account dashboard with totals, average score, best score, and recent analyses
+
+### History and exports
+
+- Saved analysis history
+- Search, filter, and sort
+- Reopen saved reports
+- Compare two saved reports side by side
+- Export reports as `Markdown` and `PDF`
+- Export history as `CSV`
+
+### Privacy and workspaces
+
+- Export account data as `JSON`
+- Delete account and local saved data
+- Create and join shared workspaces with join codes
+- Save analyses either privately or into a shared workspace
 
 ## Architecture
 
-```
-app.py                          ← Streamlit UI entry point
+```text
+app.py
 app/
-  pipeline/
-    input_layer.py              ← File/text ingestion
-    preprocessor.py             ← Text cleaning & normalisation
-    section_extractor.py        ← LLM-based section extraction (JSON output)
-    orchestrator.py             ← Pipeline runner
-    scoring_engine.py           ← Deterministic score computation
-    report_generator.py         ← Structured report assembly
-  analysis/
-    models.py                   ← Pydantic output models
-    base.py                     ← Shared prompt utilities
-    structure_analysis.py       ← Section completeness
-    consistency_analysis.py     ← Cross-section contradiction detection
-    timeline_analysis.py        ← Schedule realism & dependency checks
-    risk_analysis.py            ← Risk register evaluation
-    resource_analysis.py        ← Allocation & role gap detection
-    governance_analysis.py      ← Oversight & change control
+  auth/
+    db.py
+    models.py
+    service.py
+    session.py
   components/
-    score_display.py            ← Score gauge & breakdown
-    findings_display.py         ← Grouped findings with severity badges
-    recommendations_display.py  ← Prioritised action list
-    top_issues.py               ← Summary top-5 issues
+    auth_page.py
+    dashboard_page.py
+    findings_display.py
+    history_page.py
+    privacy_page.py
+    pricing_page.py
+    recommendations_display.py
+    score_display.py
+    top_issues.py
+    workspace_page.py
+  llm_engine/
+    insights.py
+  payments/
+    checkout.py
+    plans.py
+    stripe_client.py
+    webhook.py
+  pipeline/
+    input_layer.py
+    orchestrator.py
+    preprocessor.py
+    report_generator.py
+    scoring_engine.py
+    section_extractor.py
+  rule_engine/
+    runner.py
+    models.py
+    *_rules.py
   utils/
-    llm_client.py               ← OpenAI wrapper (temperature=0 enforced)
+    llm_client.py
+    pdf_export.py
+webhook_server.py
 ```
-
----
 
 ## Setup
 
@@ -48,60 +112,87 @@ pip install -r requirements.txt
 
 ### 2. Configure environment
 
+Create a `.env` file from `.env.example`.
+
+Important notes:
+
+- `OPENAI_API_KEY` is **optional**
+- Stripe variables are **optional** for local non-payment testing
+- The app works without Stripe and without OpenAI
+
+Example minimal local `.env`:
+
+```env
+# Optional: enables AI insights on top of deterministic findings
+# OPENAI_API_KEY=your-key-here
+# OPENAI_MODEL=gpt-4o
+
+APP_URL=http://localhost:3000
+WEBHOOK_PORT=4242
+```
+
+### 3. Run the app
+
 ```bash
-cp .env.example .env
-# Edit .env and add your OpenAI API key
+python -m streamlit run app.py --server.port 3000
 ```
 
-`.env` contents:
-```
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o
-```
+Open [http://localhost:3000](http://localhost:3000).
 
-### 3. Run
+### 4. Optional Stripe webhook server
+
+If you want to test payments later:
 
 ```bash
-streamlit run app.py
+python webhook_server.py
 ```
 
-The app runs on **http://localhost:3000** (or the port Streamlit assigns).
+## Typical local workflow
 
----
+1. Start the Streamlit app
+2. Register a new account
+3. Stay on the free tier for basic testing
+4. Paste a project plan or upload a file
+5. Run analysis
+6. Review the report, exports, history, and dashboard
 
-## Usage
+## Scoring model
 
-1. Open the app in your browser
-2. Paste a project plan **or** upload a PDF / DOCX / TXT / MD file
-3. Click **Analyse Project Plan**
-4. Review the structured audit report:
-   - **Overall Score** (1–10) with grade
-   - **Score Breakdown** by category
-   - **Top Issues** summary
-   - **Detailed Findings** grouped by category (expandable)
-   - **Prioritised Recommendations**
+Scores are deterministic and derived from rule findings only.
 
----
+Category weights:
 
-## Design Principles
+| Category | Weight |
+|---|---:|
+| Structure | 25% |
+| Consistency | 15% |
+| Timeline | 20% |
+| Risk | 20% |
+| Resource | 12% |
+| Governance | 8% |
 
-- **No chatbot** — all outputs are structured JSON internally, rendered as a report
-- **Deterministic** — LLM temperature is fixed at 0.0 for all analysis calls
-- **Modular** — each analysis stage is an independent module
-- **Typed** — Pydantic models enforce output schemas
-- **AGENT.md** is used as the system-level guidance for all LLM prompts
+Severity penalties:
 
----
+- `critical`: 3.0
+- `high`: 1.5
+- `medium`: 0.7
+- `low`: 0.3
+- `info`: 0.0
 
-## Scoring Weights
+## Current limitations
 
-| Category              | Weight |
-|-----------------------|--------|
-| Structure             | 25%    |
-| Consistency           | 20%    |
-| Timeline              | 20%    |
-| Risk                  | 20%    |
-| Resource              | 10%    |
-| Governance            | 5%     |
+- The app is strong for local and prototype use, but it is not yet a formally certified compliance product
+- Stripe setup requires valid keys and webhook configuration
+- Workspace support is focused on shared history, not real-time collaboration
+- PDF export is intentionally lightweight and text-based
 
-Scores are further adjusted by a severity-weighted penalty from findings.
+## Development notes
+
+- Test suite:
+
+```bash
+python -m pytest
+```
+
+- The local SQLite database is stored under `data/` and is gitignored
+- `APP_REVIEW.md` contains an internal product review and enhancement notes
