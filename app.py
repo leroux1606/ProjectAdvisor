@@ -10,9 +10,10 @@ from html import escape
 import os
 
 import streamlit as st
+from dotenv import load_dotenv
 
 from app.auth.db import get_workspace, init_db, record_analysis_run
-from app.auth.models import Tier
+from app.auth.models import Tier, payment_bypass_enabled
 from app.auth.service import AuthError, consume_analysis
 from app.auth.session import get_active_workspace_id, get_current_user, init, is_authenticated
 from app.components.auth_page import render_auth_page
@@ -36,6 +37,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+load_dotenv()
+
 st.markdown(
     """
     <style>
@@ -58,12 +61,62 @@ st.markdown(
         border: 1px solid #334155 !important;
         border-top: none !important;
     }
-    .stButton > button {
-        background: #1d4ed8; color: white; border: none;
-        border-radius: 8px; padding: 0.6rem 2rem;
-        font-size: 1rem; font-weight: 600; width: 100%;
+    .stButton > button,
+    .stButton button,
+    .stButton button[kind="primary"],
+    .stButton button[kind="secondary"],
+    .stButton button[data-testid^="baseButton"] {
+        background: #1d4ed8 !important;
+        color: #ffffff !important;
+        border: 1px solid #1e40af !important;
+        border-radius: 8px;
+        padding: 0.55rem 1rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+        width: 100%;
     }
-    .stButton > button:hover { background: #1e40af; }
+    .stDownloadButton > button,
+    .stDownloadButton button,
+    .stDownloadButton button[kind="primary"],
+    .stDownloadButton button[kind="secondary"],
+    .stDownloadButton button[data-testid^="baseButton"] {
+        background: #1d4ed8 !important;
+        color: #ffffff !important;
+        border: 1px solid #1e40af !important;
+        border-radius: 8px;
+        padding: 0.55rem 1rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+        width: 100%;
+    }
+    .stButton > button p,
+    .stButton > button span,
+    .stButton > button div,
+    .stButton button p,
+    .stButton button span,
+    .stButton button div {
+        color: #ffffff !important;
+        opacity: 1 !important;
+    }
+    .stDownloadButton > button p,
+    .stDownloadButton > button span,
+    .stDownloadButton > button div,
+    .stDownloadButton button p,
+    .stDownloadButton button span,
+    .stDownloadButton button div {
+        color: #ffffff !important;
+        opacity: 1 !important;
+    }
+    .stButton > button:hover,
+    .stButton button:hover {
+        background: #1e40af !important;
+        color: #ffffff !important;
+    }
+    .stDownloadButton > button:hover,
+    .stDownloadButton button:hover {
+        background: #1e40af !important;
+        color: #ffffff !important;
+    }
     .stTabs [data-baseweb="tab-list"] { background: #1e293b; border-radius: 8px; padding: 4px; }
     .stTabs [data-baseweb="tab"] { color: #cbd5e1; border-radius: 6px; }
     .stTabs [aria-selected="true"] { background: #334155 !important; color: #f1f5f9 !important; }
@@ -158,11 +211,11 @@ if page == "pricing":
 # Header
 active_workspace_id = get_active_workspace_id()
 active_workspace = get_workspace(active_workspace_id) if active_workspace_id else None
-header_col, nav_col = st.columns([4, 2], gap="medium")
+header_col, meta_col = st.columns([4, 2], gap="medium")
 with header_col:
     st.markdown(
         """
-        <div style="margin-bottom:1.5rem;">
+        <div style="margin-bottom:0.9rem;">
             <h1 style="color:#f1f5f9;font-size:1.8rem;font-weight:800;margin-bottom:0.25rem;">
                 Project Plan Scrutinizer
             </h1>
@@ -174,36 +227,38 @@ with header_col:
         """,
         unsafe_allow_html=True,
     )
-with nav_col:
+with meta_col:
     account_label = escape(user.display_name or user.email)
     workspace_label = escape(active_workspace["name"]) if active_workspace else "Personal workspace"
     st.markdown(
-        f'<div style="color:#cbd5e1;font-size:0.82rem;text-align:right;margin-bottom:0.45rem;">'
-        f'Signed in as <strong style="color:#f1f5f9;">{account_label}</strong></div>',
+        '<div style="padding-top:0.85rem;">'
+        f'<div style="color:#cbd5e1;font-size:0.82rem;text-align:right;margin-bottom:0.35rem;">'
+        f'Signed in as <strong style="color:#f1f5f9;">{account_label}</strong></div>'
+        f'<div style="color:#94a3b8;font-size:0.78rem;text-align:right;margin-bottom:0.35rem;">'
+        f'Workspace: <strong style="color:#cbd5e1;">{workspace_label}</strong></div>'
+        '</div>',
         unsafe_allow_html=True,
     )
-    st.markdown(
-        f'<div style="color:#94a3b8;font-size:0.78rem;text-align:right;margin-bottom:0.45rem;">'
-        f'Workspace: <strong style="color:#cbd5e1;">{workspace_label}</strong></div>',
-        unsafe_allow_html=True,
-    )
-    nav_a, nav_b, nav_c, nav_d = st.columns(4, gap="small")
-    with nav_a:
-        if st.button("Analysis History", use_container_width=True):
-            st.session_state["page"] = "history"
-            st.rerun()
-    with nav_b:
-        if st.button("My Account", use_container_width=True):
-            st.session_state["page"] = "dashboard"
-            st.rerun()
-    with nav_c:
-        if st.button("Privacy", use_container_width=True):
-            st.session_state["page"] = "privacy"
-            st.rerun()
-    with nav_d:
-        if st.button("Workspaces", use_container_width=True):
-            st.session_state["page"] = "workspaces"
-            st.rerun()
+
+nav_a, nav_b, nav_c, nav_d, nav_spacer = st.columns([1, 1, 1, 1, 6], gap="small")
+with nav_a:
+    if st.button("History", use_container_width=True, help="Open saved analysis history"):
+        st.session_state["page"] = "history"
+        st.rerun()
+with nav_b:
+    if st.button("Account", use_container_width=True, help="Open your account dashboard"):
+        st.session_state["page"] = "dashboard"
+        st.rerun()
+with nav_c:
+    if st.button("Privacy", use_container_width=True, help="Open privacy and data controls"):
+        st.session_state["page"] = "privacy"
+        st.rerun()
+with nav_d:
+    if st.button("Teams", use_container_width=True, help="Manage shared workspaces"):
+        st.session_state["page"] = "workspaces"
+        st.rerun()
+
+st.markdown("<div style='margin-bottom:0.9rem;'></div>", unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -230,6 +285,10 @@ with st.sidebar:
     if st.button("Workspaces", use_container_width=True):
         st.session_state["page"] = "workspaces"
         st.rerun()
+
+    if payment_bypass_enabled():
+        st.markdown("---")
+        st.info("Payment bypass is enabled for local testing.")
 
     if user.tier != Tier.PRO:
         if st.button("Upgrade Plan", use_container_width=True):
@@ -279,121 +338,8 @@ if not user.can_analyse():
     render_pricing_page(user)
     st.stop()
 
-# ── Input ─────────────────────────────────────────────────────────────────────
-st.markdown("### Submit Project Plan")
 
-input_tab, upload_tab = st.tabs(["📝 Paste Text", "📁 Upload File"])
-
-text_input: str = ""
-uploaded_filename: str | None = None
-uploaded_bytes: bytes | None = None
-
-with input_tab:
-    st.markdown(
-        '<div style="color:#cbd5e1;font-size:0.84rem;margin-bottom:0.5rem;">'
-        "Paste the full project plan text. Include objectives, scope, deliverables, "
-        "timeline, resources, risks, and governance where possible."
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    text_input = st.text_area(
-        label="Paste project plan text",
-        placeholder=(
-            "Paste the full project plan — objectives, scope, deliverables, "
-            "timeline, resources, risks, governance..."
-        ),
-        height=280,
-    )
-
-with upload_tab:
-    st.markdown(
-        '<div style="color:#cbd5e1;font-size:0.84rem;margin-bottom:0.5rem;">'
-        "Accepted file types: PDF, DOCX, TXT, and MD."
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    uploaded_file = st.file_uploader(
-        "Upload a project plan file",
-        type=["pdf", "docx", "txt", "md"],
-    )
-    if uploaded_file:
-        uploaded_filename = uploaded_file.name
-        uploaded_bytes = uploaded_file.read()
-        st.success(f"Loaded: **{uploaded_filename}** ({len(uploaded_bytes):,} bytes)")
-
-st.markdown("<br>", unsafe_allow_html=True)
-analyze_clicked = st.button("Analyze Project Plan", use_container_width=True)
-
-# ── Analysis ──────────────────────────────────────────────────────────────────
-if analyze_clicked:
-    has_file = uploaded_bytes is not None and uploaded_filename is not None
-    has_text = bool(text_input and text_input.strip())
-
-    if not has_file and not has_text:
-        st.error("Please paste a project plan or upload a file before analysing.")
-        st.stop()
-
-    # Access check — consume one unit before running (atomic check+deduct)
-    try:
-        consume_analysis(user)
-    except AuthError as exc:
-        st.error(str(exc))
-        st.session_state["page"] = "pricing"
-        st.rerun()
-
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    def update_progress(stage: str, pct: int) -> None:
-        progress_bar.progress(pct)
-        status_text.markdown(
-            f'<div style="color:#94a3b8;font-size:0.85rem;">⚙ {stage}...</div>',
-            unsafe_allow_html=True,
-        )
-
-    try:
-        report: AuditReport = run_pipeline(
-            text=text_input if has_text and not has_file else None,
-            filename=uploaded_filename,
-            file_bytes=uploaded_bytes,
-            enable_llm=enable_llm,
-            progress_callback=update_progress,
-        )
-    except PipelineError as exc:
-        progress_bar.empty()
-        status_text.empty()
-        st.error(f"Analysis failed: {exc}")
-        st.stop()
-    except Exception as exc:
-        progress_bar.empty()
-        status_text.empty()
-        st.error(f"Unexpected error: {exc}")
-        st.stop()
-
-    progress_bar.empty()
-    status_text.empty()
-    st.session_state["report"] = report
-    total_findings = sum(len(r.rule_findings) for r in report.category_results)
-    summary = ", ".join(issue.title for issue in report.top_issues[:2]) or "Analysis completed successfully."
-    record_analysis_run(
-        user_id=user.id,
-        workspace_id=active_workspace_id,
-        source_name=report.source_name,
-        source_type="upload" if has_file else "text",
-        overall_score=report.overall_score,
-        grade=report.grade,
-        word_count=report.word_count,
-        sections_found_count=len(report.sections_found),
-        rule_findings_count=total_findings,
-        ai_insights_count=len(report.ai_insights),
-        llm_enabled=report.llm_enabled,
-        summary=summary,
-        report_json=report_to_json(report),
-    )
-
-# ── Report ────────────────────────────────────────────────────────────────────
-if "report" in st.session_state:
-    report: AuditReport = st.session_state["report"]
+def render_report_view(report: AuditReport) -> None:
     escaped_source_name = escape(report.source_name) if report.source_name else ""
 
     st.markdown("---")
@@ -414,27 +360,39 @@ if "report" in st.session_state:
             unsafe_allow_html=True,
         )
 
-    export_col, clear_col = st.columns([1, 1])
-    with export_col:
-        markdown_report = report_to_markdown(report)
+    markdown_report = report_to_markdown(report)
+    safe_filename = (report.source_name or "project-plan-report").replace(" ", "-").lower()
+    st.markdown(
+        """
+        <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:0.9rem 1rem;margin-top:0.75rem;">
+            <div style="color:#cbd5e1;font-size:0.82rem;font-weight:600;margin-bottom:0.75rem;">
+                Report actions
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    action_col1, action_col2, action_col3 = st.columns([1, 1, 1], gap="small")
+    with action_col1:
         st.download_button(
-            "Download This Report",
+            "Download Markdown",
             data=markdown_report,
-            file_name=f"{(report.source_name or 'project-plan-report').replace(' ', '-').lower()}.md",
+            file_name=f"{safe_filename}.md",
             mime="text/markdown",
             use_container_width=True,
         )
-    with clear_col:
-        if st.button("Clear Current Report", use_container_width=True):
+    with action_col2:
+        st.download_button(
+            "Download PDF",
+            data=text_to_pdf_bytes(markdown_report, title=report.source_name or "Project Plan Scrutinizer Report"),
+            file_name=f"{safe_filename}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    with action_col3:
+        if st.button("Clear Report", use_container_width=True):
             st.session_state.pop("report", None)
             st.rerun()
-    st.download_button(
-        "Download Report as PDF",
-        data=text_to_pdf_bytes(markdown_report, title=report.source_name or "Project Plan Scrutinizer Report"),
-        file_name=f"{(report.source_name or 'project-plan-report').replace(' ', '-').lower()}.pdf",
-        mime="application/pdf",
-        use_container_width=True,
-    )
 
     st.markdown("<br>", unsafe_allow_html=True)
     render_score_header(report.score_breakdown, llm_enabled=report.llm_enabled)
@@ -508,3 +466,142 @@ if "report" in st.session_state:
         '</div>',
         unsafe_allow_html=True,
     )
+
+
+if "report" in st.session_state:
+    render_report_view(st.session_state["report"])
+
+# ── Input ─────────────────────────────────────────────────────────────────────
+analyze_clicked = False
+text_input: str = ""
+uploaded_filename: str | None = None
+uploaded_bytes: bytes | None = None
+
+with st.expander("Submit Project Plan", expanded=("report" not in st.session_state)):
+    input_col, action_col = st.columns([3, 1.15], gap="large")
+
+    with input_col:
+        input_tab, upload_tab = st.tabs(["📝 Paste Text", "📁 Upload File"])
+
+        with input_tab:
+            st.markdown(
+                '<div style="color:#cbd5e1;font-size:0.84rem;margin-bottom:0.5rem;">'
+                "Paste the full project plan text. Include objectives, scope, deliverables, "
+                "timeline, resources, risks, and governance where possible."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            text_input = st.text_area(
+                label="Paste project plan text",
+                placeholder=(
+                    "Paste the full project plan — objectives, scope, deliverables, "
+                    "timeline, resources, risks, governance..."
+                ),
+                height=160,
+                key="plan_text_input",
+            )
+
+        with upload_tab:
+            st.markdown(
+                '<div style="color:#cbd5e1;font-size:0.84rem;margin-bottom:0.5rem;">'
+                "Accepted file types: PDF, DOCX, TXT, and MD."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            uploaded_file = st.file_uploader(
+                "Upload a project plan file",
+                type=["pdf", "docx", "txt", "md"],
+                key="plan_file_upload",
+            )
+            if uploaded_file:
+                uploaded_filename = uploaded_file.name
+                uploaded_bytes = uploaded_file.read()
+                st.success(f"Loaded: **{uploaded_filename}** ({len(uploaded_bytes):,} bytes)")
+
+    with action_col:
+        st.markdown(
+            """
+            <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:1rem;">
+                <div style="color:#f1f5f9;font-size:0.95rem;font-weight:700;margin-bottom:0.4rem;">Step 2</div>
+                <div style="color:#cbd5e1;font-size:0.82rem;line-height:1.5;margin-bottom:0.9rem;">
+                    Run the audit once your text is pasted or your file is uploaded.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        analyze_clicked = st.button("Analyze Project Plan", use_container_width=True)
+        st.markdown(
+            '<div style="color:#cbd5e1;font-size:0.8rem;margin-top:0.55rem;">'
+            "The finished report appears above this section after analysis."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+# ── Analysis ──────────────────────────────────────────────────────────────────
+if analyze_clicked:
+    has_file = uploaded_bytes is not None and uploaded_filename is not None
+    has_text = bool(text_input and text_input.strip())
+
+    if not has_file and not has_text:
+        st.error("Please paste a project plan or upload a file before analysing.")
+        st.stop()
+
+    # Access check — consume one unit before running (atomic check+deduct)
+    try:
+        consume_analysis(user)
+    except AuthError as exc:
+        st.error(str(exc))
+        st.session_state["page"] = "pricing"
+        st.rerun()
+
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    def update_progress(stage: str, pct: int) -> None:
+        progress_bar.progress(pct)
+        status_text.markdown(
+            f'<div style="color:#94a3b8;font-size:0.85rem;">⚙ {stage}...</div>',
+            unsafe_allow_html=True,
+        )
+
+    try:
+        report: AuditReport = run_pipeline(
+            text=text_input if has_text and not has_file else None,
+            filename=uploaded_filename,
+            file_bytes=uploaded_bytes,
+            enable_llm=enable_llm,
+            progress_callback=update_progress,
+        )
+    except PipelineError as exc:
+        progress_bar.empty()
+        status_text.empty()
+        st.error(f"Analysis failed: {exc}")
+        st.stop()
+    except Exception as exc:
+        progress_bar.empty()
+        status_text.empty()
+        st.error(f"Unexpected error: {exc}")
+        st.stop()
+
+    progress_bar.empty()
+    status_text.empty()
+    st.session_state["report"] = report
+    total_findings = sum(len(r.rule_findings) for r in report.category_results)
+    summary = ", ".join(issue.title for issue in report.top_issues[:2]) or "Analysis completed successfully."
+    record_analysis_run(
+        user_id=user.id,
+        workspace_id=active_workspace_id,
+        source_name=report.source_name,
+        source_type="upload" if has_file else "text",
+        overall_score=report.overall_score,
+        grade=report.grade,
+        word_count=report.word_count,
+        sections_found_count=len(report.sections_found),
+        rule_findings_count=total_findings,
+        ai_insights_count=len(report.ai_insights),
+        llm_enabled=report.llm_enabled,
+        summary=summary,
+        report_json=report_to_json(report),
+    )
+    st.rerun()

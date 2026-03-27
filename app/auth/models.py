@@ -4,6 +4,7 @@ Auth Models — User dataclass and tier definitions.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
@@ -14,6 +15,11 @@ class Tier(str, Enum):
     FREE = "free"
     CREDITS = "credits"   # has a credit balance, no subscription
     PRO = "pro"           # active subscription (monthly or annual)
+
+
+def payment_bypass_enabled() -> bool:
+    value = os.getenv("BYPASS_PAYMENT", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 @dataclass
@@ -33,6 +39,8 @@ class User:
 
     def can_analyse(self) -> bool:
         """Return True if the user is allowed to run an analysis right now."""
+        if payment_bypass_enabled():
+            return True
         if self.tier == Tier.PRO:
             return True
         if self.tier == Tier.CREDITS and self.credits > 0:
@@ -44,6 +52,8 @@ class User:
         return False
 
     def access_label(self) -> str:
+        if payment_bypass_enabled():
+            return "Testing mode — payment bypass enabled"
         if self.tier == Tier.PRO:
             return "Pro — unlimited"
         if self.tier == Tier.CREDITS:

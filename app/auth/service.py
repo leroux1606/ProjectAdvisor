@@ -14,7 +14,7 @@ from app.auth.db import (
     get_user_by_email,
     update_user,
 )
-from app.auth.models import Tier, User
+from app.auth.models import Tier, User, payment_bypass_enabled
 
 
 class AuthError(Exception):
@@ -70,6 +70,9 @@ def consume_analysis(user: User) -> None:
     Deduct one analysis unit from the user's allowance and persist.
     Raises AuthError if the user has no remaining access.
     """
+    if payment_bypass_enabled():
+        return
+
     reset_monthly_usage_if_needed(user)
 
     if user.tier == Tier.PRO:
