@@ -4,6 +4,8 @@ Top Issues Component — renders the top 5 rule-based findings in the summary pa
 
 from __future__ import annotations
 
+from html import escape
+
 import streamlit as st
 
 from app.rule_engine.models import RuleFinding, Severity
@@ -28,6 +30,8 @@ def render_top_issues(findings: list[RuleFinding]) -> None:
 
     for finding in findings:
         color = _SEVERITY_COLOR.get(finding.severity, "#94a3b8")
+        title = escape(finding.title)
+        rule_meta = escape(f"{finding.rule_id} · {finding.severity.value.upper()} · {finding.rule_name}")
         st.markdown(
             f"""
             <div style="
@@ -39,9 +43,9 @@ def render_top_issues(findings: list[RuleFinding]) -> None:
                     background:{color};margin-top:6px;flex-shrink:0;
                 "></div>
                 <div>
-                    <div style="color:#f1f5f9;font-size:0.9rem;font-weight:500;">{finding.title}</div>
-                    <div style="color:#64748b;font-size:0.76rem;margin-top:2px;">
-                        {finding.rule_id} · {finding.severity.value.upper()} · {finding.rule_name}
+                    <div style="color:#f1f5f9;font-size:0.9rem;font-weight:500;">{title}</div>
+                    <div style="color:#cbd5e1;font-size:0.76rem;margin-top:2px;">
+                        {rule_meta}
                     </div>
                 </div>
             </div>

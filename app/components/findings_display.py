@@ -4,6 +4,8 @@ Findings Display Component — renders rule-based findings and AI insights per c
 
 from __future__ import annotations
 
+from html import escape
+
 import streamlit as st
 
 from app.rule_engine.models import AIInsight, CategoryResult, RuleFinding, Severity
@@ -39,6 +41,11 @@ def _severity_badge(severity: Severity) -> str:
 
 def render_rule_finding(finding: RuleFinding) -> None:
     color, bg = _SEVERITY_STYLES.get(finding.severity, ("#94a3b8", "#1e293b"))
+    title = escape(finding.title)
+    rule_id = escape(finding.rule_id)
+    explanation = escape(finding.explanation)
+    suggested_fix = escape(finding.suggested_fix)
+    rule_name = escape(finding.rule_name)
     st.markdown(
         f"""
         <div style="
@@ -51,15 +58,15 @@ def render_rule_finding(finding: RuleFinding) -> None:
         ">
             <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.4rem;">
                 {_severity_badge(finding.severity)}
-                <span style="color:#f1f5f9;font-weight:600;font-size:0.95rem;">{finding.title}</span>
-                <span style="color:#475569;font-size:0.75rem;margin-left:auto;">{finding.rule_id}</span>
+                <span style="color:#f1f5f9;font-weight:600;font-size:0.95rem;">{title}</span>
+                <span style="color:#cbd5e1;font-size:0.75rem;margin-left:auto;">{rule_id}</span>
             </div>
-            <div style="color:#94a3b8;font-size:0.87rem;margin-bottom:0.5rem;">{finding.explanation}</div>
+            <div style="color:#94a3b8;font-size:0.87rem;margin-bottom:0.5rem;">{explanation}</div>
             <div style="background:#0f172a;border-radius:6px;padding:0.6rem 0.8rem;color:#7dd3fc;font-size:0.85rem;">
-                <span style="color:#38bdf8;font-weight:600;">Fix: </span>{finding.suggested_fix}
+                <span style="color:#38bdf8;font-weight:600;">Fix: </span>{suggested_fix}
             </div>
-            <div style="color:#334155;font-size:0.72rem;margin-top:0.4rem;">
-                Rule: <code style="color:#475569;">{finding.rule_name}</code>
+            <div style="color:#cbd5e1;font-size:0.72rem;margin-top:0.4rem;">
+                Rule: <code style="color:#e2e8f0;">{rule_name}</code>
             </div>
         </div>
         """,
@@ -68,6 +75,9 @@ def render_rule_finding(finding: RuleFinding) -> None:
 
 
 def render_ai_insight(insight: AIInsight) -> None:
+    title = escape(insight.title)
+    detail = escape(insight.insight)
+    suggestion = escape(insight.suggestion)
     st.markdown(
         f"""
         <div style="
@@ -83,11 +93,11 @@ def render_ai_insight(insight: AIInsight) -> None:
                     background:#1e3a5f;color:#93c5fd;border:1px solid #3b82f6;
                     padding:2px 8px;border-radius:4px;font-size:0.7rem;font-weight:700;
                 ">AI INSIGHT</span>
-                <span style="color:#e2e8f0;font-weight:600;font-size:0.92rem;">{insight.title}</span>
+                <span style="color:#e2e8f0;font-weight:600;font-size:0.92rem;">{title}</span>
             </div>
-            <div style="color:#94a3b8;font-size:0.86rem;margin-bottom:0.5rem;">{insight.insight}</div>
+            <div style="color:#94a3b8;font-size:0.86rem;margin-bottom:0.5rem;">{detail}</div>
             <div style="background:#172554;border-radius:6px;padding:0.5rem 0.8rem;color:#93c5fd;font-size:0.84rem;">
-                <span style="color:#60a5fa;font-weight:600;">Suggestion: </span>{insight.suggestion}
+                <span style="color:#60a5fa;font-weight:600;">Suggestion: </span>{suggestion}
             </div>
         </div>
         """,
@@ -117,8 +127,8 @@ def render_category_result(result: CategoryResult) -> None:
             parts.append(f'<span style="color:#94a3b8">{other} other</span>')
 
         st.markdown(
-            f'<div style="color:#64748b;font-size:0.8rem;margin-bottom:0.75rem;">'
-            f'<strong style="color:#94a3b8">Rule findings:</strong> '
+            f'<div style="color:#cbd5e1;font-size:0.8rem;margin-bottom:0.75rem;">'
+            f'<strong style="color:#f1f5f9">Rule findings:</strong> '
             f'{len(result.rule_findings)} — {" · ".join(parts)}</div>',
             unsafe_allow_html=True,
         )
@@ -127,7 +137,7 @@ def render_category_result(result: CategoryResult) -> None:
 
     if result.ai_insights:
         st.markdown(
-            '<div style="color:#64748b;font-size:0.8rem;margin:0.75rem 0 0.5rem;">'
+            '<div style="color:#cbd5e1;font-size:0.8rem;margin:0.75rem 0 0.5rem;">'
             '<strong style="color:#60a5fa">AI Insights</strong> (supplementary)</div>',
             unsafe_allow_html=True,
         )

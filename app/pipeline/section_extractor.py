@@ -239,7 +239,10 @@ Project plan text:
     return sections
 
 
-def extract_sections(preprocessed: PreprocessedText) -> ExtractedSections:
+def extract_sections(
+    preprocessed: PreprocessedText,
+    allow_llm_fallback: bool = True,
+) -> ExtractedSections:
     """
     Primary: attempt regex-based extraction.
     Fallback: use LLM if fewer than 2 sections found and API key is available.
@@ -254,7 +257,7 @@ def extract_sections(preprocessed: PreprocessedText) -> ExtractedSections:
         return sections
 
     # Regex yielded little — try LLM if available
-    if os.getenv("OPENAI_API_KEY"):
+    if allow_llm_fallback and os.getenv("OPENAI_API_KEY"):
         logger.info("Regex found only %d sections — attempting LLM extraction.", found)
         try:
             llm_sections = _extract_by_llm(preprocessed)

@@ -27,6 +27,8 @@ class User:
     usage_reset_date: str             # ISO date string — when monthly_usage resets
     stripe_customer_id: Optional[str] = None
     stripe_subscription_id: Optional[str] = None
+    display_name: Optional[str] = None
+    organization: Optional[str] = None
     created_at: str = ""
 
     def can_analyse(self) -> bool:

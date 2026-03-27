@@ -26,26 +26,38 @@ def render_auth_page() -> None:
             border: 1px solid #475569 !important;
             border-radius: 6px !important;
             font-size: 0.95rem !important;
+            caret-color: #f8fafc !important;
         }
         /* Placeholder text */
-        .stTextInput input::placeholder { color: #64748b !important; opacity: 1 !important; }
+        .stTextInput input::placeholder { color: #94a3b8 !important; opacity: 1 !important; }
+        .stTextInput input::selection {
+            background: #2563eb !important;
+            color: #ffffff !important;
+        }
         /* Tab labels */
-        .stTabs [data-baseweb="tab"] { color: #94a3b8 !important; font-weight: 600; font-size: 0.95rem; }
+        .stTabs [data-baseweb="tab"] { color: #cbd5e1 !important; font-weight: 600; font-size: 0.95rem; }
         .stTabs [aria-selected="true"] { color: #f1f5f9 !important; }
         /* Form submit button */
         .stFormSubmitButton > button {
-            background: #3b82f6 !important; color: white !important;
+            background: #1d4ed8 !important; color: white !important;
             border: none !important; border-radius: 8px !important;
             padding: 0.6rem 2rem !important; font-size: 1rem !important;
             font-weight: 600 !important; width: 100% !important;
         }
-        .stFormSubmitButton > button:hover { background: #2563eb !important; }
+        .stFormSubmitButton > button:hover { background: #1e40af !important; }
+        .stFormSubmitButton > button:focus-visible,
+        .stTextInput input:focus-visible,
+        .stTabs [data-baseweb="tab"]:focus-visible {
+            outline: 3px solid #f8fafc !important;
+            outline-offset: 2px !important;
+            box-shadow: 0 0 0 2px #1d4ed8 !important;
+        }
         </style>
         <div style="max-width:420px;margin:3rem auto 0;">
             <h1 style="color:#f1f5f9;font-size:1.6rem;font-weight:800;text-align:center;margin-bottom:0.25rem;">
                 🔍 Project Plan Scrutinizer
             </h1>
-            <p style="color:#64748b;font-size:0.88rem;text-align:center;margin-bottom:2rem;">
+            <p style="color:#cbd5e1;font-size:0.88rem;text-align:center;margin-bottom:2rem;">
                 Professional project audit tool
             </p>
         </div>
@@ -65,7 +77,7 @@ def render_auth_page() -> None:
             _render_register()
 
         st.markdown(
-            '<div style="color:#334155;font-size:0.75rem;text-align:center;margin-top:2rem;">'
+            '<div style="color:#cbd5e1;font-size:0.75rem;text-align:center;margin-top:2rem;">'
             'Free tier: 2 analyses/month · No credit card required to start'
             '</div>',
             unsafe_allow_html=True,
@@ -95,7 +107,7 @@ def _render_register() -> None:
     with st.form("register_form"):
         st.markdown("#### Create Account")
         st.markdown(
-            '<div style="color:#64748b;font-size:0.82rem;margin-bottom:0.75rem;">'
+            '<div style="color:#cbd5e1;font-size:0.82rem;margin-bottom:0.75rem;">'
             'Free tier included — 2 analyses per month, no credit card required.</div>',
             unsafe_allow_html=True,
         )

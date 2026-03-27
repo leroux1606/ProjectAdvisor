@@ -83,7 +83,7 @@ def run_pipeline(
     # ── Stage 3: Section Extraction ───────────────────────────────────────────
     _progress("Extracting sections", 18)
     try:
-        sections = extract_sections(preprocessed)
+        sections = extract_sections(preprocessed, allow_llm_fallback=llm_available)
     except Exception as exc:
         raise PipelineError(f"Section extraction failed: {exc}") from exc
 

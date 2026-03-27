@@ -33,7 +33,7 @@ def render_pricing_page(user: User) -> None:
         """
         <div style="text-align:center;margin-bottom:2rem;">
             <h2 style="color:#f1f5f9;font-size:1.5rem;font-weight:800;">Upgrade Your Plan</h2>
-            <p style="color:#64748b;font-size:0.9rem;">
+            <p style="color:#cbd5e1;font-size:0.9rem;">
                 Choose the option that fits your needs. All payments processed securely by Stripe.
             </p>
         </div>
@@ -57,7 +57,7 @@ def render_pricing_page(user: User) -> None:
             _render_plan_card(plan, user)
 
     st.markdown(
-        '<div style="color:#334155;font-size:0.75rem;text-align:center;margin-top:2rem;">'
+        '<div style="color:#cbd5e1;font-size:0.75rem;text-align:center;margin-top:2rem;">'
         'Payments processed by Stripe · Subscriptions can be cancelled anytime from your dashboard'
         '</div>',
         unsafe_allow_html=True,

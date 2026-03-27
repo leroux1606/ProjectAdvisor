@@ -5,6 +5,8 @@ Each item shows which rule triggered it for full transparency.
 
 from __future__ import annotations
 
+from html import escape
+
 import streamlit as st
 
 from app.pipeline.report_generator import RecommendationItem
@@ -37,6 +39,9 @@ def render_recommendations(recommendations: list[RecommendationItem]) -> None:
     for item in recommendations:
         color = _SEVERITY_COLOR.get(item.severity, "#94a3b8")
         icon = _CATEGORY_ICONS.get(item.category, "•")
+        title = escape(item.title)
+        action = escape(item.action)
+        rule_meta = escape(f"{item.rule_id} · {item.rule_name}")
 
         st.markdown(
             f"""
@@ -56,16 +61,16 @@ def render_recommendations(recommendations: list[RecommendationItem]) -> None:
                 <div style="flex:1;">
                     <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem;">
                         <span style="font-size:0.9rem;">{icon}</span>
-                        <span style="color:#f1f5f9;font-weight:600;font-size:0.92rem;">{item.title}</span>
+                        <span style="color:#f1f5f9;font-weight:600;font-size:0.92rem;">{title}</span>
                         <span style="
                             color:{color};font-size:0.7rem;font-weight:600;
                             background:{color}22;padding:1px 6px;border-radius:3px;
                             margin-left:auto;
                         ">{item.severity.value.upper()}</span>
                     </div>
-                    <div style="color:#94a3b8;font-size:0.87rem;margin-bottom:0.4rem;">{item.action}</div>
-                    <div style="color:#334155;font-size:0.72rem;">
-                        Triggered by rule: <code style="color:#475569;">{item.rule_id} · {item.rule_name}</code>
+                    <div style="color:#94a3b8;font-size:0.87rem;margin-bottom:0.4rem;">{action}</div>
+                    <div style="color:#cbd5e1;font-size:0.72rem;">
+                        Triggered by rule: <code style="color:#e2e8f0;">{rule_meta}</code>
                     </div>
                 </div>
             </div>

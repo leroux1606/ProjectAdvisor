@@ -100,7 +100,7 @@ def render_score_header(scores: ScoreBreakdown, llm_enabled: bool = False) -> No
 def render_score_breakdown(scores: ScoreBreakdown) -> None:
     st.markdown("#### Score Breakdown")
     st.markdown(
-        '<div style="color:#475569;font-size:0.78rem;margin-bottom:0.75rem;">'
+        '<div style="color:#cbd5e1;font-size:0.78rem;margin-bottom:0.75rem;">'
         'Scores are deterministic — computed from rule findings only.</div>',
         unsafe_allow_html=True,
     )

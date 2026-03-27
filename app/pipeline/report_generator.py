@@ -5,8 +5,10 @@ No LLM calls. Pure data assembly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Optional
 
 from app.pipeline.scoring_engine import ScoreBreakdown
@@ -49,6 +51,142 @@ class AuditReport:
     recommendations: list[RecommendationItem]
     ai_insights: list[AIInsight]
     llm_enabled: bool
+
+
+def _to_json_safe(value):
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, list):
+        return [_to_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _to_json_safe(item) for key, item in value.items()}
+    return value
+
+
+def report_to_dict(report: AuditReport) -> dict:
+    return _to_json_safe(asdict(report))
+
+
+def report_to_json(report: AuditReport) -> str:
+    return json.dumps(report_to_dict(report))
+
+
+def report_from_dict(data: dict) -> AuditReport:
+    def _finding(item: dict) -> RuleFinding:
+        return RuleFinding(
+            rule_id=item["rule_id"],
+            category=item["category"],
+            severity=Severity(item["severity"]),
+            title=item["title"],
+            explanation=item["explanation"],
+            suggested_fix=item["suggested_fix"],
+            rule_name=item["rule_name"],
+        )
+
+    def _insight(item: dict) -> AIInsight:
+        return AIInsight(
+            category=item["category"],
+            title=item["title"],
+            insight=item["insight"],
+            suggestion=item["suggestion"],
+        )
+
+    def _category(item: dict) -> CategoryResult:
+        return CategoryResult(
+            category=item["category"],
+            label=item["label"],
+            rule_findings=[_finding(f) for f in item.get("rule_findings", [])],
+            ai_insights=[_insight(i) for i in item.get("ai_insights", [])],
+        )
+
+    score_data = data["score_breakdown"]
+    scores = ScoreBreakdown(
+        structure=score_data["structure"],
+        consistency=score_data["consistency"],
+        timeline=score_data["timeline"],
+        risk=score_data["risk"],
+        resource=score_data["resource"],
+        governance=score_data["governance"],
+        overall=score_data["overall"],
+        grade=score_data["grade"],
+        top_issues=[_finding(f) for f in score_data.get("top_issues", [])],
+    )
+
+    return AuditReport(
+        generated_at=data["generated_at"],
+        source_name=data.get("source_name"),
+        word_count=data["word_count"],
+        sections_found=data.get("sections_found", []),
+        sections_missing=data.get("sections_missing", []),
+        overall_score=data["overall_score"],
+        grade=data["grade"],
+        score_breakdown=scores,
+        top_issues=[_finding(f) for f in data.get("top_issues", [])],
+        category_results=[_category(c) for c in data.get("category_results", [])],
+        recommendations=[
+            RecommendationItem(
+                priority=item["priority"],
+                category=item["category"],
+                rule_id=item["rule_id"],
+                title=item["title"],
+                action=item["action"],
+                severity=Severity(item["severity"]),
+                rule_name=item["rule_name"],
+            )
+            for item in data.get("recommendations", [])
+        ],
+        ai_insights=[_insight(i) for i in data.get("ai_insights", [])],
+        llm_enabled=data.get("llm_enabled", False),
+    )
+
+
+def report_from_json(raw: str) -> AuditReport:
+    return report_from_dict(json.loads(raw))
+
+
+def report_to_markdown(report: AuditReport) -> str:
+    lines = [
+        "# Project Plan Scrutinizer Report",
+        "",
+        f"- Generated: {report.generated_at}",
+        f"- Source: {report.source_name or 'Pasted project plan'}",
+        f"- Words: {report.word_count}",
+        f"- Overall score: {report.overall_score} / 10",
+        f"- Grade: {report.grade}",
+        f"- Mode: {'Rule-based + AI Insights' if report.llm_enabled else 'Rule-based only'}",
+        "",
+        "## Sections",
+        "",
+        f"- Found: {', '.join(report.sections_found) if report.sections_found else 'None'}",
+        f"- Missing: {', '.join(report.sections_missing) if report.sections_missing else 'None'}",
+        "",
+        "## Top Issues",
+        "",
+    ]
+
+    if report.top_issues:
+        for issue in report.top_issues:
+            lines.extend(
+                [
+                    f"- [{issue.severity.value.upper()}] {issue.title}",
+                    f"  - Rule: {issue.rule_id} · {issue.rule_name}",
+                    f"  - Why: {issue.explanation}",
+                    f"  - Fix: {issue.suggested_fix}",
+                ]
+            )
+    else:
+        lines.append("- No top issues recorded.")
+
+    lines.extend(["", "## Recommendations", ""])
+    if report.recommendations:
+        for item in report.recommendations:
+            lines.append(
+                f"{item.priority}. {item.title} ({item.severity.value.upper()}) - {item.action}"
+            )
+    else:
+        lines.append("No recommendations generated.")
+
+    return "\n".join(lines)
 
 
 def _build_recommendations(bundle: HybridBundle) -> list[RecommendationItem]:
