@@ -24,10 +24,13 @@ _CORE_SECTIONS = list(_MIN_WORDS.keys())
 
 # SMART objective keyword signals
 _SMART_MEASURABLE = re.compile(
-    r"\b(\d+%|\d+ percent|kpi|metric|measur|quantif|target|benchmark)\b", re.IGNORECASE
+    r"(\d+\s*%|\d+\s*percent|\bkpi\b|\bmetric|\bmeasur|\bquantif|\btarget|\bbenchmark)",
+    re.IGNORECASE,
 )
 _SMART_TIME_BOUND = re.compile(
-    r"\b(by |deadline|due date|end of|q[1-4]|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4})\b",
+    r"(\bby\s+\d|\bdeadline\b|\bdue date\b|\bend of\b|\bq[1-4]\b"
+    r"|\bjan\b|\bfeb\b|\bmar\b|\bapr\b|\bmay\b|\bjun\b|\bjul\b|\baug\b"
+    r"|\bsep\b|\boct\b|\bnov\b|\bdec\b|\b\d{4}\b)",
     re.IGNORECASE,
 )
 

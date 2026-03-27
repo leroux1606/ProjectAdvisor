@@ -74,8 +74,20 @@ _HEADING_ALIASES: dict[str, list[str]] = {
     ],
 }
 
-# Build compiled patterns per section
+# Build compiled patterns per section.
+# Two forms:
+#   full_text_pattern : used to search within the full document text (anchored, multiline)
+#   heading_pattern   : used to match a single extracted heading string (unanchored)
 _HEADING_PATTERNS: dict[str, re.Pattern] = {
+    section: re.compile(
+        r"(?:" + "|".join(aliases) + r")",
+        re.IGNORECASE,
+    )
+    for section, aliases in _HEADING_ALIASES.items()
+}
+
+# Separate full-text patterns for the "no headings found" fallback
+_FULLTEXT_PATTERNS: dict[str, re.Pattern] = {
     section: re.compile(
         r"^#+\s*(?:" + "|".join(aliases) + r")\b"
         r"|^(?:" + "|".join(aliases) + r")[:\s]*$",
@@ -111,51 +123,66 @@ class ExtractedSections:
         return [name for name in core if getattr(self, name) in (None, "")]
 
 
+def _is_heading_line(line: str) -> bool:
+    """Return True if a line looks like a section heading (not body content)."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    # Markdown heading
+    if re.match(r"^#{1,4}\s+\S", stripped):
+        return True
+    # Short line (≤ 60 chars) ending with colon and no sentence-ending punctuation before it
+    if len(stripped) <= 60 and stripped.endswith(":") and "." not in stripped[:-1]:
+        return True
+    # ALL-CAPS short line
+    if stripped.isupper() and 3 <= len(stripped) <= 50:
+        return True
+    return False
+
+
 def _extract_by_regex(text: str) -> ExtractedSections:
     """
-    Split document into sections by detecting headings.
-    Returns sections found; undetected sections remain None.
+    Two-pass extraction:
+    Pass 1 — identify heading lines and split text into chunks.
+    Pass 2 — match each chunk heading to a canonical section name.
     """
-    # Split on any line that looks like a heading (markdown or plain)
-    heading_re = re.compile(
-        r"^(#{1,4}\s+.+|[A-Z][A-Za-z\s&/]{2,60}[:\.]?)\s*$",
-        re.MULTILINE,
-    )
+    lines = text.splitlines()
 
-    # Find all heading positions
-    splits = [(m.start(), m.group(0).strip()) for m in heading_re.finditer(text)]
+    # Pass 1: find heading line indices
+    heading_indices = [i for i, line in enumerate(lines) if _is_heading_line(line)]
 
-    if not splits:
-        # No headings found — try to assign full text to whichever sections match
+    if not heading_indices:
+        # No headings — fall back to keyword presence in full text
         sections = ExtractedSections(extraction_method="regex")
-        for section, pattern in _HEADING_PATTERNS.items():
+        for section, pattern in _FULLTEXT_PATTERNS.items():
             if pattern.search(text):
-                # Section keyword appears inline — use the full text as a rough proxy
                 setattr(sections, section, text[:3000])
         return sections
 
-    # Build a dict: heading_text -> content
-    chunks: dict[str, str] = {}
-    for i, (pos, heading) in enumerate(splits):
-        next_pos = splits[i + 1][0] if i + 1 < len(splits) else len(text)
-        content = text[pos:next_pos].strip()
-        # Remove the heading line itself from content
-        lines = content.splitlines()
-        body = "\n".join(lines[1:]).strip() if len(lines) > 1 else ""
-        chunks[heading] = body
+    # Build chunks: heading -> body text
+    chunks: list[tuple[str, str]] = []
+    for idx, heading_line_idx in enumerate(heading_indices):
+        heading = lines[heading_line_idx].strip()
+        next_idx = heading_indices[idx + 1] if idx + 1 < len(heading_indices) else len(lines)
+        body_lines = lines[heading_line_idx + 1: next_idx]
+        body = "\n".join(body_lines).strip()
+        chunks.append((heading, body))
 
+    # Pass 2: match each heading to a canonical section
     sections = ExtractedSections(extraction_method="regex")
 
-    for canonical, pattern in _HEADING_PATTERNS.items():
-        for heading, body in chunks.items():
-            if pattern.match(heading) or pattern.search(heading):
+    for heading, body in chunks:
+        # Normalise: strip markdown prefix and trailing punctuation
+        clean = re.sub(r"^#+\s*", "", heading).rstrip(":. \t").strip()
+
+        for canonical, pattern in _HEADING_PATTERNS.items():
+            if pattern.search(clean):
                 existing = getattr(sections, canonical)
                 if existing:
-                    # Append if multiple headings match same section
                     setattr(sections, canonical, existing + "\n" + body)
                 else:
                     setattr(sections, canonical, body if body else None)
-                break  # first match wins per section
+                break  # first canonical match wins
 
     return sections
 
