@@ -1,6 +1,7 @@
 """
 Project Plan Scrutinizer — Streamlit UI Entry Point
 Hybrid engine: deterministic rules (primary) + LLM insights (secondary, optional).
+Auth gate: login required. Freemium + credits + subscription via Stripe.
 """
 
 from __future__ import annotations
@@ -9,7 +10,14 @@ import os
 
 import streamlit as st
 
+from app.auth.db import init_db
+from app.auth.models import Tier
+from app.auth.service import AuthError, consume_analysis
+from app.auth.session import get_current_user, init, is_authenticated
+from app.components.auth_page import render_auth_page
+from app.components.dashboard_page import render_dashboard
 from app.components.findings_display import render_all_findings
+from app.components.pricing_page import render_pricing_page
 from app.components.recommendations_display import render_recommendations
 from app.components.score_display import render_score_breakdown, render_score_header
 from app.components.top_issues import render_top_issues
@@ -58,7 +66,47 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Header ────────────────────────────────────────────────────────────────────
+# ── Bootstrap ─────────────────────────────────────────────────────────────────
+init_db()
+init()
+
+# ── Page routing ──────────────────────────────────────────────────────────────
+if not is_authenticated():
+    render_auth_page()
+    st.stop()
+
+user = get_current_user()
+if user is None:
+    render_auth_page()
+    st.stop()
+
+# Handle post-payment redirect from Stripe
+query_params = st.query_params
+payment_status = query_params.get("payment")
+if payment_status == "success":
+    st.success("Payment successful! Your account has been updated.")
+    st.query_params.clear()
+elif payment_status == "cancelled":
+    st.info("Payment cancelled — no charge was made.")
+    st.query_params.clear()
+
+# Page state
+page = st.session_state.get("page", "main")
+
+if page == "dashboard":
+    render_dashboard(user)
+    st.stop()
+
+if page == "pricing":
+    render_pricing_page(user)
+    if st.button("← Back", key="back_from_pricing"):
+        st.session_state["page"] = "main"
+        st.rerun()
+    st.stop()
+
+# ── Main App ──────────────────────────────────────────────────────────────────
+
+# Header
 st.markdown(
     """
     <div style="margin-bottom:1.5rem;">
@@ -74,13 +122,36 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Sidebar: Settings ─────────────────────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    st.markdown("### Account")
+    st.markdown(
+        f'<div style="color:#94a3b8;font-size:0.82rem;margin-bottom:0.5rem;">{user.email}</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div style="color:#64748b;font-size:0.8rem;margin-bottom:1rem;">{user.access_label()}</div>',
+        unsafe_allow_html=True,
+    )
+
+    col_dash, col_upgrade = st.columns(2)
+    with col_dash:
+        if st.button("Dashboard", use_container_width=True):
+            st.session_state["page"] = "dashboard"
+            st.rerun()
+    with col_upgrade:
+        if user.tier != Tier.PRO:
+            if st.button("Upgrade", use_container_width=True):
+                st.session_state["page"] = "pricing"
+                st.rerun()
+
+    st.markdown("---")
     st.markdown("### Settings")
+
     llm_available = bool(os.getenv("OPENAI_API_KEY"))
     if llm_available:
         enable_llm = st.toggle("Enable AI Insights", value=True, help=(
-            "When enabled, the LLM adds soft quality insights on top of rule findings. "
+            "LLM adds soft quality insights on top of rule findings. "
             "Rule-based scores are unaffected."
         ))
         st.markdown(
@@ -90,9 +161,10 @@ with st.sidebar:
     else:
         enable_llm = False
         st.markdown(
-            '<div style="color:#f59e0b;font-size:0.8rem;">⚠ No API key — running in deterministic mode only</div>',
+            '<div style="color:#f59e0b;font-size:0.8rem;">⚠ No API key — deterministic mode</div>',
             unsafe_allow_html=True,
         )
+
     st.markdown("---")
     st.markdown(
         """
@@ -100,13 +172,21 @@ with st.sidebar:
         <strong style="color:#64748b;">Scoring weights</strong><br>
         Structure: 25% &nbsp;|&nbsp; Timeline: 20%<br>
         Risk: 20% &nbsp;|&nbsp; Consistency: 15%<br>
-        Resource: 12% &nbsp;|&nbsp; Governance: 8%<br><br>
-        Scores are computed from rule findings only.<br>
-        AI insights do not affect the score.
+        Resource: 12% &nbsp;|&nbsp; Governance: 8%<br>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+# ── Access check banner ───────────────────────────────────────────────────────
+if not user.can_analyse():
+    st.warning(
+        "You have used all your free analyses this month. "
+        "Upgrade to continue.",
+        icon="⚠️",
+    )
+    render_pricing_page(user)
+    st.stop()
 
 # ── Input ─────────────────────────────────────────────────────────────────────
 st.markdown("### Submit Project Plan")
@@ -151,6 +231,14 @@ if analyze_clicked:
         st.error("Please paste a project plan or upload a file before analysing.")
         st.stop()
 
+    # Access check — consume one unit before running (atomic check+deduct)
+    try:
+        consume_analysis(user)
+    except AuthError as exc:
+        st.error(str(exc))
+        st.session_state["page"] = "pricing"
+        st.rerun()
+
     progress_bar = st.progress(0)
     status_text = st.empty()
 
@@ -190,7 +278,6 @@ if "report" in st.session_state:
 
     st.markdown("---")
 
-    # Report header
     col_title, col_meta = st.columns([3, 2])
     with col_title:
         st.markdown(
@@ -198,10 +285,6 @@ if "report" in st.session_state:
             unsafe_allow_html=True,
         )
     with col_meta:
-        extraction_badge = (
-            '<span style="background:#1e293b;color:#94a3b8;border:1px solid #334155;'
-            'padding:1px 7px;border-radius:4px;font-size:0.72rem;">regex extraction</span>'
-        )
         st.markdown(
             f'<div style="color:#475569;font-size:0.8rem;text-align:right;">'
             f'{report.generated_at}'
@@ -212,11 +295,8 @@ if "report" in st.session_state:
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # Score header
     render_score_header(report.score_breakdown, llm_enabled=report.llm_enabled)
 
-    # Summary + Score breakdown
     col_summary, col_scores = st.columns([1, 1], gap="large")
 
     with col_summary:
@@ -260,20 +340,16 @@ if "report" in st.session_state:
         render_score_breakdown(report.score_breakdown)
 
     st.markdown("---")
-
-    # Detailed Findings
     st.markdown("### Detailed Findings")
     st.markdown(
         '<div style="color:#64748b;font-size:0.83rem;margin-bottom:1rem;">'
-        'Rule findings are deterministic — each shows the rule ID and rule name that triggered it. '
+        'Rule findings are deterministic — each shows the rule ID and name that triggered it. '
         'AI insights (if present) are supplementary and do not affect scores.</div>',
         unsafe_allow_html=True,
     )
     render_all_findings(report.category_results)
 
     st.markdown("---")
-
-    # Recommendations
     st.markdown("### Recommendations")
     st.markdown(
         '<div style="color:#64748b;font-size:0.83rem;margin-bottom:1rem;">'
@@ -282,7 +358,6 @@ if "report" in st.session_state:
     )
     render_recommendations(report.recommendations)
 
-    # Footer
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
         '<div style="color:#334155;font-size:0.75rem;text-align:center;">'
