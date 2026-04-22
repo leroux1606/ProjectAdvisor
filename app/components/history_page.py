@@ -193,7 +193,11 @@ def render_history_page(user: User) -> None:
         if st.button("Delete Selected", use_container_width=True, type="secondary", disabled=not selected_owned_ids):
             for run_id in selected_owned_ids:
                 delete_analysis_run(int(run_id), user.id)
-            st.success(f"Deleted {len(selected_owned_ids)} selected report(s) that belong to you.")
+            skipped = len(selected_ids) - len(selected_owned_ids)
+            msg = f"Deleted {len(selected_owned_ids)} report(s)."
+            if skipped:
+                msg += f" {skipped} shared report(s) were skipped — you can only delete your own."
+            st.success(msg)
             st.rerun()
     with action_col3:
         if st.button("Clear My Saved History", use_container_width=True, type="secondary"):

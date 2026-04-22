@@ -126,7 +126,7 @@ def _render_register() -> None:
         try:
             user = register(email, password)
             set_current_user(user)
-            st.success("Account created! Welcome.")
+            st.session_state["flash_success"] = "Account created! Welcome."
             st.rerun()
         except AuthError as e:
             st.error(str(e))

@@ -162,6 +162,10 @@ if user is None:
     render_auth_page()
     st.stop()
 
+# Flash messages (e.g. post-registration welcome)
+if flash := st.session_state.pop("flash_success", None):
+    st.success(flash)
+
 # Handle post-payment redirect from Stripe
 query_params = st.query_params
 payment_status = query_params.get("payment")
@@ -366,13 +370,7 @@ def render_report_view(report: AuditReport) -> None:
     markdown_report = report_to_markdown(report)
     safe_filename = (report.source_name or "project-plan-report").replace(" ", "-").lower()
     st.markdown(
-        """
-        <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:0.9rem 1rem;margin-top:0.75rem;">
-            <div style="color:#cbd5e1;font-size:0.82rem;font-weight:600;margin-bottom:0.75rem;">
-                Report actions
-            </div>
-        </div>
-        """,
+        '<div style="color:#cbd5e1;font-size:0.82rem;font-weight:600;margin-top:0.75rem;margin-bottom:0.5rem;">Report actions</div>',
         unsafe_allow_html=True,
     )
     action_col1, action_col2, action_col3 = st.columns([1, 1, 1], gap="small")
@@ -571,6 +569,9 @@ if analyze_clicked:
     if not has_file and not has_text:
         st.error("Please paste a project plan or upload a file before analysing.")
         st.stop()
+
+    if has_file and has_text:
+        st.info("Both a file and pasted text were provided — the uploaded file will be analysed. The pasted text has been ignored.")
 
     # Access check — consume one unit before running (atomic check+deduct)
     try:
