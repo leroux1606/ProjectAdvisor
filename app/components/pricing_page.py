@@ -4,6 +4,7 @@ Pricing Page — displays plan cards and redirects to Stripe Checkout.
 
 from __future__ import annotations
 
+from html import escape
 import streamlit as st
 
 from app.auth.models import User
@@ -104,13 +105,14 @@ def _render_plan_card(plan: Plan, user: User) -> None:
     if st.button(f"Buy — {plan.price_display}", key=f"buy_{plan.id}", use_container_width=True):
         try:
             url = get_checkout_url(user, plan)
+            safe_url = escape(url)
             st.markdown(
-                f'<meta http-equiv="refresh" content="0;url={url}">',
+                f'<meta http-equiv="refresh" content="0;url={safe_url}">',
                 unsafe_allow_html=True,
             )
             st.markdown(
                 f'<div style="color:#94a3b8;font-size:0.85rem;text-align:center;">'
-                f'Redirecting to Stripe… <a href="{url}" style="color:#3b82f6;">click here</a> if not redirected.</div>',
+                f'Redirecting to Stripe… <a href="{safe_url}" style="color:#3b82f6;">click here</a> if not redirected.</div>',
                 unsafe_allow_html=True,
             )
         except Exception as e:

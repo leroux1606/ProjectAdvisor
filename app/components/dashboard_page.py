@@ -298,7 +298,7 @@ def _render_actions(user: User) -> None:
     if user.tier == Tier.PRO and user.stripe_customer_id:
         from app.payments.stripe_client import create_billing_portal_session  # noqa: PLC0415
         import os  # noqa: PLC0415
-        app_url = os.getenv("APP_URL", "http://localhost:3000")
+        app_url = os.getenv("APP_URL", "http://localhost:8501")
         try:
             portal_url = create_billing_portal_session(user.stripe_customer_id, app_url)
             st.link_button("Manage Subscription", portal_url, use_container_width=True)
