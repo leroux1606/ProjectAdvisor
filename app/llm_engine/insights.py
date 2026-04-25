@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 
+from app.llm.openrouter import llm_available
 from app.pipeline.section_extractor import ExtractedSections
 from app.rule_engine.models import AIInsight, HybridBundle
 
@@ -90,8 +90,8 @@ def generate_insights(
     Call the LLM for soft insights and attach them to the appropriate CategoryResult
     in the bundle. Returns the bundle unchanged if LLM is unavailable.
     """
-    if not os.getenv("OPENAI_API_KEY"):
-        logger.info("OPENAI_API_KEY not set — skipping LLM insights.")
+    if not llm_available():
+        logger.info("No LLM provider configured — skipping AI insights.")
         return bundle
 
     try:

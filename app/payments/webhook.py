@@ -10,6 +10,7 @@ import logging
 import stripe
 
 from app.auth.db import (
+    claim_stripe_event,
     get_user_by_id,
     get_user_by_stripe_customer,
     record_transaction,
@@ -23,17 +24,29 @@ logger = logging.getLogger(__name__)
 
 def handle_event(event: stripe.Event) -> None:
     """Dispatch a Stripe event to the appropriate handler."""
+    event_id = event.get("id")
+    event_type = event.get("type", "")
+
+    if not event_id:
+        logger.warning("Stripe event missing id — processing anyway: %s", event_type)
+    else:
+        # Idempotency: refuse to process the same event twice. Stripe retries are
+        # legitimate but must not double-credit users.
+        if not claim_stripe_event(event_id, event_type):
+            logger.info("Skipping duplicate Stripe event %s (%s)", event_id, event_type)
+            return
+
     handlers = {
         "checkout.session.completed":           _on_checkout_completed,
         "customer.subscription.updated":        _on_subscription_updated,
         "customer.subscription.deleted":        _on_subscription_deleted,
         "invoice.payment_failed":               _on_payment_failed,
     }
-    handler = handlers.get(event["type"])
+    handler = handlers.get(event_type)
     if handler:
         handler(event["data"]["object"])
     else:
-        logger.debug("Unhandled Stripe event type: %s", event["type"])
+        logger.debug("Unhandled Stripe event type: %s", event_type)
 
 
 def _on_checkout_completed(session: dict) -> None:

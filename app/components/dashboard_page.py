@@ -12,12 +12,14 @@ from app.auth.db import (
     get_analysis_history,
     get_analysis_stats,
     get_analysis_stats_for_workspace,
+    get_llm_usage_breakdown,
     get_user_transactions,
     get_workspace,
     update_user,
 )
 from app.auth.models import Tier, User
 from app.auth.session import get_active_workspace_id, logout, refresh_user
+from app.llm import budget as llm_budget
 from app.payments.plans import FREE_MONTHLY_LIMIT
 from app.project_types import get_project_type_label
 
@@ -48,6 +50,7 @@ def render_dashboard(user: User) -> None:
         _render_profile_editor(user)
         _render_analysis_stats(user, workspace_id)
         _render_usage(user)
+        _render_llm_usage(user)
         _render_recent_analyses(user, workspace_id)
         _render_transactions(user)
 
@@ -193,6 +196,77 @@ def _render_analysis_stats(user: User, workspace_id: int | None) -> None:
     st.markdown(
         f'<div style="color:#cbd5e1;font-size:0.8rem;margin:-0.35rem 0 1rem;">'
         f'Last analysis: <strong style="color:#f1f5f9;">{last_run}</strong></div>',
+        unsafe_allow_html=True,
+    )
+
+
+_PURPOSE_LABELS = {
+    "generate_plan": "Plan generation",
+    "chat_turn": "Chat assistant",
+    "rewrite_section": "Rewrite section",
+    "add_section": "Add section",
+    "regenerate_timeline": "Regenerate timeline",
+    "insights": "AI Insights",
+    "section_extract": "Section extraction",
+}
+
+
+def _render_llm_usage(user: User) -> None:
+    status = llm_budget.get_status(user)
+    if status.monthly_limit <= 0:
+        return
+
+    used_pct = min(100, int((status.used / status.monthly_limit) * 100)) if status.monthly_limit else 0
+    bar_color = "#ef4444" if used_pct >= 90 else ("#f59e0b" if used_pct >= 70 else "#3b82f6")
+
+    st.markdown(
+        f"""
+        <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;
+                    padding:1rem 1.2rem;margin-bottom:1rem;">
+            <div style="color:#cbd5e1;font-size:0.78rem;margin-bottom:8px;">AI Token Budget</div>
+            <div style="color:#f1f5f9;font-size:0.95rem;margin-bottom:6px;">
+                {status.used:,} / {status.monthly_limit:,} tokens used
+            </div>
+            <div style="background:#334155;border-radius:4px;height:6px;overflow:hidden;">
+                <div style="background:{bar_color};height:100%;width:{used_pct}%;"></div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Period start = same logic as budget module (start of last month relative to reset_date)
+    reset = (user.usage_reset_date or "")[:10]
+    if len(reset) >= 7:
+        year = int(reset[:4])
+        month = int(reset[5:7])
+        period_year = year if month > 1 else year - 1
+        period_month = month - 1 if month > 1 else 12
+        since = f"{period_year:04d}-{period_month:02d}-01"
+    else:
+        since = "0000-01-01"
+
+    breakdown = get_llm_usage_breakdown(user.id, since=since)
+    if not breakdown:
+        return
+
+    rows_html = "".join(
+        f'<div style="display:flex;justify-content:space-between;'
+        f'padding:0.3rem 0;border-bottom:1px solid #1e293b;font-size:0.82rem;">'
+        f'<span style="color:#cbd5e1;">{escape(_PURPOSE_LABELS.get(row["purpose"], row["purpose"]))}</span>'
+        f'<span style="color:#94a3b8;">{int(row["calls"])} call(s)</span>'
+        f'<span style="color:#f1f5f9;font-weight:600;">'
+        f'{int(row["prompt_tokens"]) + int(row["completion_tokens"]):,} tokens</span>'
+        f'</div>'
+        for row in breakdown
+    )
+    st.markdown(
+        f'<div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;'
+        f'padding:0.75rem 1rem;margin-bottom:1rem;">'
+        f'<div style="color:#cbd5e1;font-size:0.76rem;margin-bottom:0.4rem;">'
+        f'Breakdown by purpose (current period)</div>'
+        f'{rows_html}'
+        f'</div>',
         unsafe_allow_html=True,
     )
 

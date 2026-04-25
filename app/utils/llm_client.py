@@ -1,32 +1,15 @@
 """
-LLM Client — thin wrapper around the OpenAI Chat Completions API.
-All analysis modules must use this function exclusively.
-Returns raw string content; callers are responsible for JSON parsing.
+LLM Client — thin compatibility shim over app.llm.openrouter.
+
+Existing modules (insights, section_extractor) call `call_llm(...)`. This shim
+preserves that interface while routing through the OpenRouter client. Once
+those callers migrate to the typed `app.llm.openrouter` interface directly,
+this module can be removed.
 """
 
 from __future__ import annotations
 
-import os
-
-from dotenv import load_dotenv
-from openai import OpenAI
-
-load_dotenv()
-
-_client: OpenAI | None = None
-
-
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise EnvironmentError(
-                "OPENAI_API_KEY is not set. "
-                "Create a .env file from .env.example and add your key."
-            )
-        _client = OpenAI(api_key=api_key)
-    return _client
+from app.llm.openrouter import LLMError, call_chat
 
 
 def call_llm(
@@ -36,24 +19,21 @@ def call_llm(
     max_tokens: int = 2048,
 ) -> str:
     """
-    Call the configured OpenAI model and return the raw response string.
-    temperature=0.0 is enforced for all analysis calls to ensure determinism.
+    Backward-compatible wrapper. Returns the raw response string.
+    Callers are responsible for JSON parsing.
     """
-    model = os.getenv("OPENAI_MODEL", "gpt-4o")
-    client = _get_client()
-
-    response = client.chat.completions.create(
-        model=model,
-        temperature=temperature,
-        max_tokens=max_tokens,
+    result = call_chat(
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
+        temperature=temperature,
+        max_tokens=max_tokens,
+        # Honoured by OpenAI and some OpenRouter models. Ignored by others;
+        # the existing callers' system prompts already enforce JSON.
         response_format={"type": "json_object"},
     )
+    return result.text
 
-    content = response.choices[0].message.content
-    if content is None:
-        raise ValueError("LLM returned an empty response.")
-    return content
+
+__all__ = ["call_llm", "LLMError"]

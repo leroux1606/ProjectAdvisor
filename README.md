@@ -1,25 +1,31 @@
 # Project Plan Scrutinizer
 
-A deterministic project audit application for reviewing project plans. This is **not** a chatbot.
+A deterministic project audit application for reviewing project plans, with optional AI features for drafting and revising plans.
 
-The app accepts a project plan as pasted text or an uploaded document, runs it through a hybrid audit pipeline, and returns a structured report with scores, findings, recommendations, saved history, exports, privacy controls, and optional team workspaces.
+The app accepts a project plan as pasted text, an uploaded document, **or a free-form prompt** (which the AI drafts into a plan). It runs the plan through a hybrid audit pipeline and returns a structured report with scores, findings, recommendations, saved history, exports, privacy controls, and optional team workspaces. A scoped chat assistant and a fixed set of "Quick Actions" let you ask about findings or revise individual sections — but the rule engine remains the **only** source of scoring.
 
 ## What it does
 
 - Ingests `PDF`, `DOCX`, `TXT`, and `MD` project plans
+- **Generates draft plans from a free-form prompt** (optional, requires an LLM key)
 - Extracts core sections such as objectives, scope, deliverables, timeline, resources, risks, governance, assumptions, constraints, and budget
 - Runs a deterministic rule engine for structure, consistency, timeline, risk, resource, and governance checks
-- Optionally adds AI insights for softer quality issues when an OpenAI key is configured
-- Scores the plan deterministically from rule findings only
+- Optionally adds AI insights for softer quality issues when an LLM provider is configured
+- **Plan-aware chat assistant**: ask questions about the loaded plan or its findings (read-only)
+- **Quick Actions**: rewrite a section, add a section, or regenerate the timeline — every change is shown as a diff and you accept or reject before anything is overwritten
+- Scores the plan deterministically from rule findings only — AI never affects scores
 - Saves report history with filtering, comparison, export, and reopen support
 - Supports user accounts, free usage, credit packs, subscriptions, privacy/data export, and shared workspaces
 
 ## Key product behavior
 
-- **Deterministic-first**: the rule engine is the primary source of truth
-- **Optional AI layer**: AI insights are supplementary and do not affect scoring
-- **True deterministic mode**: when AI is disabled, the app does not use LLM fallback for section extraction
-- **Structured output**: results are rendered as an audit report, not a conversation
+- **Deterministic-first**: the rule engine is the only source of scoring
+- **Optional AI layer**: AI features (insights, generation, chat, Quick Actions) are supplementary and do not affect scoring
+- **True deterministic mode**: when AI is disabled, the app does not use LLM fallback for section extraction or anything else
+- **Structured output**: results are rendered as an audit report; chat is scoped to the loaded plan
+- **No silent edits**: every AI-proposed change to the plan goes through an explicit accept/reject diff
+- **Bounded surface**: chat verbs are a fixed list (rewrite_section, add_section, regenerate_timeline). The assistant cannot run code or external tools.
+- **Per-user token budget**: every LLM call is metered against a monthly cap to control cost
 - **Privacy-conscious defaults**: the app stores report metadata and saved report output, but does not intentionally retain raw uploaded document content by default
 
 ## Main features
@@ -69,17 +75,28 @@ app/
     session.py
   components/
     auth_page.py
+    chat_panel.py            # plan-aware read-only chat
     dashboard_page.py
     findings_display.py
     history_page.py
     privacy_page.py
     pricing_page.py
+    quick_actions.py         # rewrite/add/regenerate verbs
     recommendations_display.py
     score_display.py
     top_issues.py
     workspace_page.py
+  llm/
+    openrouter.py            # HTTP client (OpenRouter primary, OpenAI fallback)
+    budget.py                # per-user token budget enforcement
+    chat_service.py          # read-only chat turn handler
+    verbs.py                 # write-action verbs (rewrite, add, regenerate)
+    prompts/
+      generate_plan.py
+      chat_assistant.py
+      write_verbs.py
   llm_engine/
-    insights.py
+    insights.py              # AI Insights layer (uses app.llm.openrouter)
   payments/
     checkout.py
     plans.py
@@ -88,6 +105,7 @@ app/
   pipeline/
     input_layer.py
     orchestrator.py
+    plan_generator.py        # prompt → draft plan markdown
     preprocessor.py
     report_generator.py
     scoring_engine.py
@@ -97,7 +115,7 @@ app/
     models.py
     *_rules.py
   utils/
-    llm_client.py
+    llm_client.py            # legacy shim — calls into app/llm/openrouter
     pdf_export.py
 webhook_server.py
 ```
@@ -116,16 +134,16 @@ Create a `.env` file from `.env.example`.
 
 Important notes:
 
-- `OPENAI_API_KEY` is **optional**
+- LLM features (AI Insights, plan generation, chat, Quick Actions) require either `OPENROUTER_API_KEY` (preferred) or `OPENAI_API_KEY`. Both are **optional** — the deterministic audit works without them.
 - Stripe variables are **optional** for local non-payment testing
-- The app works without Stripe and without OpenAI
+- Per-user monthly token budgets default to Free 20k / Credits 200k / Pro 2M, overridable via env
 
 Example minimal local `.env`:
 
 ```env
-# Optional: enables AI insights on top of deterministic findings
-# OPENAI_API_KEY=your-key-here
-# OPENAI_MODEL=gpt-4o
+# Optional: enables AI features (insights, plan generation, chat, Quick Actions)
+# OPENROUTER_API_KEY=sk-or-v1-...
+# OPENROUTER_MODEL=anthropic/claude-haiku-4-5
 
 APP_URL=http://localhost:3000
 WEBHOOK_PORT=4242

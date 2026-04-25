@@ -245,9 +245,9 @@ def extract_sections(
 ) -> ExtractedSections:
     """
     Primary: attempt regex-based extraction.
-    Fallback: use LLM if fewer than 2 sections found and API key is available.
+    Fallback: use LLM if fewer than 2 sections found and a provider is configured.
     """
-    import os  # noqa: PLC0415
+    from app.llm.openrouter import llm_available  # noqa: PLC0415
 
     sections = _extract_by_regex(preprocessed.cleaned_text)
     found = len(sections.present_sections())
@@ -257,7 +257,7 @@ def extract_sections(
         return sections
 
     # Regex yielded little — try LLM if available
-    if allow_llm_fallback and os.getenv("OPENAI_API_KEY"):
+    if allow_llm_fallback and llm_available():
         logger.info("Regex found only %d sections — attempting LLM extraction.", found)
         try:
             llm_sections = _extract_by_llm(preprocessed)

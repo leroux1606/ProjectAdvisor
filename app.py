@@ -16,9 +16,13 @@ from app.auth.db import get_workspace, init_db, record_analysis_run
 from app.auth.models import Tier, payment_bypass_enabled
 from app.auth.service import AuthError, consume_analysis
 from app.auth.session import get_active_workspace_id, get_current_user, init, is_authenticated
+from app.llm import budget as llm_budget
+from app.llm.openrouter import llm_available
 from app.components.auth_page import render_auth_page
+from app.components.chat_panel import render_chat_panel
 from app.components.dashboard_page import render_dashboard
 from app.components.findings_display import render_all_findings
+from app.components.quick_actions import render_quick_actions
 from app.components.history_page import render_history_page
 from app.components.privacy_page import render_privacy_page
 from app.components.pricing_page import render_pricing_page
@@ -26,7 +30,8 @@ from app.components.recommendations_display import render_recommendations
 from app.components.score_display import render_score_breakdown, render_score_header
 from app.components.top_issues import render_top_issues
 from app.components.workspace_page import render_workspace_page
-from app.pipeline.orchestrator import PipelineError, run_pipeline
+from app.pipeline.orchestrator import PipelineError, run_pipeline_full
+from app.pipeline.plan_generator import PlanGenerationError, generate_plan
 from app.pipeline.report_generator import AuditReport, report_to_json, report_to_markdown
 from app.project_types import PROJECT_TYPE_MAP, PROJECT_TYPE_PROFILES, get_project_type_label
 from app.utils.pdf_export import text_to_pdf_bytes
@@ -303,14 +308,42 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Settings")
 
-    llm_available = bool(os.getenv("OPENAI_API_KEY"))
-    if llm_available:
+    llm_ok = llm_available()
+    if llm_ok:
         enable_llm = st.toggle("Enable AI Insights", value=True, help=(
             "LLM adds soft quality insights on top of rule findings. "
             "Rule-based scores are unaffected."
         ))
+        provider = "OpenRouter" if os.getenv("OPENROUTER_API_KEY") else "OpenAI"
+        model_name = (
+            os.getenv("OPENROUTER_MODEL") if os.getenv("OPENROUTER_API_KEY")
+            else os.getenv("OPENAI_MODEL", "gpt-4o")
+        ) or "anthropic/claude-haiku-4-5"
         st.markdown(
-            '<div style="color:#4ade80;font-size:0.8rem;">✓ OpenAI API key detected</div>',
+            f'<div style="color:#4ade80;font-size:0.8rem;">✓ {provider} configured</div>'
+            f'<div style="color:#94a3b8;font-size:0.74rem;margin-top:2px;">'
+            f'Model: {escape(model_name)}</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Token budget meter
+        budget_status = llm_budget.get_status(user)
+        used_pct = (
+            min(100, int((budget_status.used / budget_status.monthly_limit) * 100))
+            if budget_status.monthly_limit > 0 else 0
+        )
+        bar_color = "#ef4444" if used_pct >= 90 else ("#f59e0b" if used_pct >= 70 else "#3b82f6")
+        st.markdown(
+            f'<div style="margin-top:0.65rem;">'
+            f'<div style="color:#cbd5e1;font-size:0.76rem;margin-bottom:4px;">'
+            f'AI tokens this period</div>'
+            f'<div style="background:#334155;border-radius:4px;height:6px;overflow:hidden;">'
+            f'<div style="background:{bar_color};height:100%;width:{used_pct}%;"></div>'
+            f'</div>'
+            f'<div style="color:#94a3b8;font-size:0.72rem;margin-top:3px;">'
+            f'{budget_status.used:,} / {budget_status.monthly_limit:,}'
+            f'</div>'
+            f'</div>',
             unsafe_allow_html=True,
         )
     else:
@@ -393,6 +426,9 @@ def render_report_view(report: AuditReport) -> None:
     with action_col3:
         if st.button("Clear Report", use_container_width=True):
             st.session_state.pop("report", None)
+            st.session_state.pop("plan_text", None)
+            st.session_state.pop("analysis_run_id", None)
+            st.session_state.pop("verb_proposal", None)
             st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -476,6 +512,17 @@ def render_report_view(report: AuditReport) -> None:
 
 if "report" in st.session_state:
     render_report_view(st.session_state["report"])
+    render_quick_actions(
+        user=user,
+        plan_text=st.session_state.get("plan_text"),
+        report=st.session_state["report"],
+    )
+    render_chat_panel(
+        user=user,
+        plan_text=st.session_state.get("plan_text"),
+        report=st.session_state["report"],
+        analysis_run_id=st.session_state.get("analysis_run_id"),
+    )
 
 # ── Input ─────────────────────────────────────────────────────────────────────
 analyze_clicked = False
@@ -488,7 +535,9 @@ with st.expander("Submit Project Plan", expanded=("report" not in st.session_sta
     input_col, action_col = st.columns([3, 1.15], gap="large")
 
     with input_col:
-        input_tab, upload_tab = st.tabs(["📝 Paste Text", "📁 Upload File"])
+        input_tab, upload_tab, generate_tab = st.tabs([
+            "📝 Paste Text", "📁 Upload File", "✨ Generate from Prompt",
+        ])
 
         with input_tab:
             st.markdown(
@@ -524,6 +573,38 @@ with st.expander("Submit Project Plan", expanded=("report" not in st.session_sta
                 uploaded_filename = uploaded_file.name
                 uploaded_bytes = uploaded_file.read()
                 st.success(f"Loaded: **{uploaded_filename}** ({len(uploaded_bytes):,} bytes)")
+
+        with generate_tab:
+            st.markdown(
+                '<div style="color:#cbd5e1;font-size:0.84rem;margin-bottom:0.5rem;">'
+                "Describe the project. The AI drafts a plan covering all canonical sections; "
+                "you can edit it before running the audit."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            generation_prompt = st.text_area(
+                label="Describe the project to plan",
+                placeholder=(
+                    "e.g. We're migrating a 200-seat company off on-prem Exchange to "
+                    "Microsoft 365 over 6 months, with a £150k budget and zero downtime "
+                    "for the sales team."
+                ),
+                height=120,
+                key="plan_generation_prompt",
+                disabled=not llm_available(),
+            )
+            if not llm_available():
+                st.warning(
+                    "AI plan generation requires an LLM provider. "
+                    "Add OPENROUTER_API_KEY to your .env file.",
+                    icon="⚠️",
+                )
+            generate_clicked = st.button(
+                "Generate Draft Plan",
+                use_container_width=True,
+                disabled=not llm_available(),
+                key="generate_plan_btn",
+            )
 
     with action_col:
         selected_project_type = st.selectbox(
@@ -561,6 +642,42 @@ with st.expander("Submit Project Plan", expanded=("report" not in st.session_sta
             unsafe_allow_html=True,
         )
 
+# ── Plan Generation ───────────────────────────────────────────────────────────
+if generate_clicked:
+    if not llm_available():
+        st.error("AI plan generation is not available. Configure OPENROUTER_API_KEY first.")
+        st.stop()
+
+    if not generation_prompt or not generation_prompt.strip():
+        st.error("Please describe the project before generating a plan.")
+        st.stop()
+
+    with st.spinner("Generating draft plan..."):
+        try:
+            generated = generate_plan(
+                user_prompt=generation_prompt,
+                project_type=selected_project_type,
+                user=user,
+            )
+        except llm_budget.BudgetExceeded as exc:
+            st.error(str(exc))
+            st.stop()
+        except PlanGenerationError as exc:
+            st.error(str(exc))
+            st.stop()
+        except Exception as exc:
+            st.error(f"Plan generation failed: {exc}")
+            st.stop()
+
+    # Pre-fill the paste-text input so the user can review/edit before audit.
+    st.session_state["plan_text_input"] = generated.text
+    st.session_state["flash_success"] = (
+        f"Draft plan ready ({generated.completion_tokens:,} tokens). "
+        "Switch to the Paste Text tab to review and edit, then click Analyze."
+    )
+    st.rerun()
+
+
 # ── Analysis ──────────────────────────────────────────────────────────────────
 if analyze_clicked:
     has_file = uploaded_bytes is not None and uploaded_filename is not None
@@ -573,11 +690,9 @@ if analyze_clicked:
     if has_file and has_text:
         st.info("Both a file and pasted text were provided — the uploaded file will be analysed. The pasted text has been ignored.")
 
-    # Access check — consume one unit before running (atomic check+deduct)
-    try:
-        consume_analysis(user)
-    except AuthError as exc:
-        st.error(str(exc))
+    # Pre-flight access check (no deduction yet) — quota is consumed only after a successful run.
+    if not user.can_analyse():
+        st.error("You have no remaining analyses on this plan. Please upgrade or buy credits.")
         st.session_state["page"] = "pricing"
         st.rerun()
 
@@ -592,7 +707,7 @@ if analyze_clicked:
         )
 
     try:
-        report: AuditReport = run_pipeline(
+        pipeline_result = run_pipeline_full(
             text=text_input if has_text and not has_file else None,
             filename=uploaded_filename,
             file_bytes=uploaded_bytes,
@@ -600,6 +715,7 @@ if analyze_clicked:
             enable_llm=enable_llm,
             progress_callback=update_progress,
         )
+        report: AuditReport = pipeline_result.report
     except PipelineError as exc:
         progress_bar.empty()
         status_text.empty()
@@ -613,10 +729,21 @@ if analyze_clicked:
 
     progress_bar.empty()
     status_text.empty()
+
+    # Pipeline succeeded — deduct quota now. If this raises, the user keeps the report
+    # in session but the run is not persisted; their balance is also untouched.
+    try:
+        consume_analysis(user)
+    except AuthError as exc:
+        st.error(str(exc))
+        st.session_state["page"] = "pricing"
+        st.rerun()
+
     st.session_state["report"] = report
+    st.session_state["plan_text"] = pipeline_result.plan_text
     total_findings = sum(len(r.rule_findings) for r in report.category_results)
     summary = ", ".join(issue.title for issue in report.top_issues[:2]) or "Analysis completed successfully."
-    record_analysis_run(
+    run_id = record_analysis_run(
         user_id=user.id,
         workspace_id=active_workspace_id,
         source_name=report.source_name,
@@ -632,4 +759,5 @@ if analyze_clicked:
         summary=summary,
         report_json=report_to_json(report),
     )
+    st.session_state["analysis_run_id"] = run_id
     st.rerun()

@@ -104,6 +104,39 @@ def init_db() -> None:
                 created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
                 UNIQUE(workspace_id, user_id)
             );
+
+            CREATE TABLE IF NOT EXISTS processed_stripe_events (
+                event_id        TEXT    PRIMARY KEY,
+                event_type      TEXT    NOT NULL,
+                processed_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS llm_usage (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id             INTEGER NOT NULL REFERENCES users(id),
+                purpose             TEXT    NOT NULL,
+                model               TEXT    NOT NULL,
+                prompt_tokens       INTEGER NOT NULL DEFAULT 0,
+                completion_tokens   INTEGER NOT NULL DEFAULT 0,
+                created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_llm_usage_user_created
+                ON llm_usage(user_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id             INTEGER NOT NULL REFERENCES users(id),
+                analysis_run_id     INTEGER REFERENCES analysis_runs(id),
+                role                TEXT    NOT NULL,
+                content             TEXT    NOT NULL,
+                action_json         TEXT,
+                tokens_used         INTEGER NOT NULL DEFAULT 0,
+                created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_run
+                ON chat_messages(user_id, analysis_run_id, created_at);
         """)
         _ensure_column(con, "users", "display_name", "TEXT")
         _ensure_column(con, "users", "organization", "TEXT")
@@ -182,6 +215,20 @@ def update_user(user: User) -> None:
         )
 
 
+def claim_stripe_event(event_id: str, event_type: str) -> bool:
+    """
+    Atomically reserve a Stripe event ID. Returns True if this is the first time
+    we've seen the event (caller should process it), False if it was already
+    processed (caller should skip).
+    """
+    with _conn() as con:
+        cur = con.execute(
+            "INSERT OR IGNORE INTO processed_stripe_events (event_id, event_type) VALUES (?, ?)",
+            (event_id, event_type),
+        )
+        return cur.rowcount > 0
+
+
 def record_transaction(
     user_id: int,
     tx_type: str,
@@ -221,9 +268,9 @@ def record_analysis_run(
     llm_enabled: bool,
     summary: str,
     report_json: Optional[str] = None,
-) -> None:
+) -> int:
     with _conn() as con:
-        con.execute(
+        cur = con.execute(
             """INSERT INTO analysis_runs (
                 user_id, workspace_id, source_name, project_type, source_type, overall_score, grade, word_count,
                 sections_found_count, rule_findings_count, ai_insights_count,
@@ -246,6 +293,7 @@ def record_analysis_run(
                 report_json,
             ),
         )
+        return int(cur.lastrowid)
 
 
 def get_analysis_history(
@@ -483,3 +531,99 @@ def user_has_workspace_access(user_id: int, workspace_id: int) -> bool:
             (user_id, workspace_id),
         ).fetchone()
         return row is not None
+
+
+def record_llm_usage(
+    user_id: int,
+    purpose: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> None:
+    with _conn() as con:
+        con.execute(
+            """INSERT INTO llm_usage
+                   (user_id, purpose, model, prompt_tokens, completion_tokens)
+               VALUES (?, ?, ?, ?, ?)""",
+            (user_id, purpose, model, prompt_tokens, completion_tokens),
+        )
+
+
+def get_token_usage_for_period(user_id: int, since: str) -> int:
+    """Return total tokens (prompt + completion) used by a user since `since` (ISO date)."""
+    with _conn() as con:
+        row = con.execute(
+            """SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total
+               FROM llm_usage
+               WHERE user_id = ? AND created_at >= ?""",
+            (user_id, since),
+        ).fetchone()
+        return int(row["total"]) if row else 0
+
+
+def get_llm_usage_breakdown(user_id: int, since: str) -> list[dict]:
+    """Per-purpose token usage since `since`."""
+    with _conn() as con:
+        rows = con.execute(
+            """SELECT purpose,
+                      COUNT(*) AS calls,
+                      COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                      COALESCE(SUM(completion_tokens), 0) AS completion_tokens
+               FROM llm_usage
+               WHERE user_id = ? AND created_at >= ?
+               GROUP BY purpose
+               ORDER BY (prompt_tokens + completion_tokens) DESC""",
+            (user_id, since),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def append_chat_message(
+    user_id: int,
+    analysis_run_id: Optional[int],
+    role: str,
+    content: str,
+    action_json: Optional[str] = None,
+    tokens_used: int = 0,
+) -> int:
+    with _conn() as con:
+        cur = con.execute(
+            """INSERT INTO chat_messages
+                   (user_id, analysis_run_id, role, content, action_json, tokens_used)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (user_id, analysis_run_id, role, content, action_json, tokens_used),
+        )
+        return int(cur.lastrowid)
+
+
+def get_chat_messages(user_id: int, analysis_run_id: Optional[int]) -> list[dict]:
+    with _conn() as con:
+        if analysis_run_id is None:
+            rows = con.execute(
+                """SELECT * FROM chat_messages
+                   WHERE user_id = ? AND analysis_run_id IS NULL
+                   ORDER BY created_at ASC, id ASC""",
+                (user_id,),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                """SELECT * FROM chat_messages
+                   WHERE user_id = ? AND analysis_run_id = ?
+                   ORDER BY created_at ASC, id ASC""",
+                (user_id, analysis_run_id),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def clear_chat_messages(user_id: int, analysis_run_id: Optional[int]) -> None:
+    with _conn() as con:
+        if analysis_run_id is None:
+            con.execute(
+                "DELETE FROM chat_messages WHERE user_id = ? AND analysis_run_id IS NULL",
+                (user_id,),
+            )
+        else:
+            con.execute(
+                "DELETE FROM chat_messages WHERE user_id = ? AND analysis_run_id = ?",
+                (user_id, analysis_run_id),
+            )
